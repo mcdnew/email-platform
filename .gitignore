@@ -1,21 +1,10 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg
-*.egg-info/
-dist/
-build/
-
-# Virtual environments
+# .gitignore
 venv/
-.env/
-
-# VSCode and IDEs
-.vscode/
-.idea/
-
-# Streamlit
-.streamlit/
-
-# macOS
+__pycache__/
+*.pyc
+.env
+*.db
+*.sqlite
 .DS_Store
+*.log
+
