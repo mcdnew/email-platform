@@ -1,6 +1,9 @@
-# email-platform/app/crud.py
+### app/crud.py
+# This file implements database-level CRUD operations using SQLModel sessions.
+# It handles operations for prospects, templates, sequences, steps, and scheduling logic.
+
 from sqlmodel import Session, select
-from app.models import Prospect, EmailTemplate, Sequence, SequenceStep, ScheduledEmail
+from app.models import Prospect, EmailTemplate, Sequence, SequenceStep, ScheduledEmail, EmailTemplateUpdate
 from datetime import datetime, timedelta
 
 # Prospects
@@ -41,6 +44,18 @@ def delete_template(session: Session, template_id: int):
         session.delete(template)
         session.commit()
 
+def update_template(session: Session, template_id: int, data: EmailTemplateUpdate):
+    db_template = session.get(EmailTemplate, template_id)
+    if not db_template:
+        return None
+    data_dict = data.dict(exclude_unset=True)
+    for key, value in data_dict.items():
+        setattr(db_template, key, value)
+    session.add(db_template)
+    session.commit()
+    session.refresh(db_template)
+    return db_template
+
 # Sequences
 def create_sequence(session: Session, sequence: Sequence):
     session.add(sequence)
@@ -76,5 +91,4 @@ def schedule_sequence_for_prospect(session: Session, prospect_id: int, sequence_
         )
         session.add(scheduled)
     session.commit()
-
 

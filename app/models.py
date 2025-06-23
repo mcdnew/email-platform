@@ -1,4 +1,6 @@
-# email-platform/app/models.py
+### app/models.py
+# This file defines the core SQLModel database models and CRUD-related schemas.
+# Models correspond to database tables for prospects, templates, sequences, steps, and emails.
 
 from typing import Optional
 from sqlmodel import SQLModel, Field
@@ -10,6 +12,7 @@ class Prospect(SQLModel, table=True):
     name: str
     email: str
     company: Optional[str] = None
+    sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")  # NEW: Assigned sequence
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class EmailTemplate(SQLModel, table=True):
@@ -38,3 +41,13 @@ class ScheduledEmail(SQLModel, table=True):
     sent_at: Optional[datetime] = None
     status: str = "pending"  # pending, sent, failed
 
+# Additional schemas for CRUD operations
+class EmailTemplateCreate(SQLModel):
+    name: str
+    subject: str
+    body: str
+
+class EmailTemplateUpdate(SQLModel):
+    name: Optional[str] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
