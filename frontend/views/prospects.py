@@ -1,6 +1,6 @@
 ### frontend/views/prospects.py
 # This Streamlit page manages prospects.
-# Supports CSV import, filtering, sorting, pagination, editing, deleting, manual add, and assigning prospects to sequences.
+# Supports CSV import, filtering, sorting, pagination, editing, deleting, manual add, assigning prospects to sequences, and shows assigned sequence and scheduled emails.
 
 import streamlit as st
 import requests
@@ -73,6 +73,11 @@ def show():
             st.write(f"**Company:** {p.get('company', '-')}")
             if p.get("sequence_id"):
                 st.info(f"Assigned Sequence ID: {p['sequence_id']}")
+                scheduled = requests.get(f"{API_URL}/scheduled-emails/{p['id']}")
+                if scheduled.status_code == 200:
+                    with st.expander("🗕️ Scheduled Emails"):
+                        for s in scheduled.json():
+                            st.write(f"- Step {s['step_number']}: Template {s['template_id']} (Send in {s['delay_days']} days)")
             st.write(f"**Created:** {p['created_at']}")
 
             new_name = st.text_input("Edit Name", p["name"], key=f"edit_name_{p['id']}")
