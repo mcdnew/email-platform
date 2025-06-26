@@ -12,3 +12,4 @@ __pycache__/
 *.pyc
 *.db
 test_prospects.csv
+.env
