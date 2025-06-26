@@ -1,4 +1,4 @@
-# email-platform/app/config.py
+#app/config.py
 
 import os
 from dotenv import load_dotenv
@@ -12,6 +12,7 @@ class Settings:
     SMTP_USER: str = os.getenv("SMTP_USER", "user@example.com")
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "password")
     SMTP_BCC: str = os.getenv("SMTP_BCC", "")
+    MAX_EMAILS_PER_DAY: int = int(os.getenv("MAX_EMAILS_PER_DAY", 100))  # ✅ added config limit
 
 settings = Settings()
 

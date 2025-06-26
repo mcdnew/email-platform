@@ -2,175 +2,215 @@
 # This file registers all FastAPI routes for the backend API.
 # It includes endpoints for handling templates, prospects, sequences, test-sending emails, and more.
 
+# 📄 File: app/main.py
+
 from fastapi import FastAPI, HTTPException, Depends, Query
 from sqlmodel import Session, select
 from typing import Optional
-from app.models import EmailTemplateUpdate, EmailTemplate, EmailTemplateCreate, Prospect, Sequence
-from app.schemas import TestEmailRequest, AssignSequenceRequest
+from fastapi.responses import HTMLResponse, JSONResponse
+
 from app.database import get_session
-from app.crud import (
-    update_template,
-    create_template,
-    get_templates,
-    schedule_sequence_for_prospect,
-    update_prospect,
-    delete_prospect,
-    create_prospect,
-    create_sequence,
-    get_sequences
-)
+from app.models import ScheduledEmail, Prospect, EmailTemplate, SentEmail, Sequence, SequenceStep
+from app.schemas import TestEmailRequest, AssignSequenceRequest
 from app.mailer import send_email
+from app.config import settings
+from app.routes import open_tracking
+
+import pytz
+import random
+import time as time_module
+from datetime import datetime, time
 
 app = FastAPI()
+app.include_router(open_tracking.router)
 
-# Sequence steps
-@app.get("/sequences/{sequence_id}/steps")
-def get_sequence_steps(sequence_id: int, session: Session = Depends(get_session)):
-    from app.models import SequenceStep
-    stmt = select(SequenceStep).where(SequenceStep.sequence_id == sequence_id)
-    return session.exec(stmt).all()
+# --- Constants ---
+CET = pytz.timezone("Europe/Paris")
+SEND_START = time(9, 0)
+SEND_END = time(21, 0)
 
-@app.post("/sequences/{sequence_id}/steps")
-def create_sequence_step(sequence_id: int, step: dict, session: Session = Depends(get_session)):
-    from app.models import SequenceStep
-    new_step = SequenceStep(sequence_id=sequence_id, **step)
-    session.add(new_step)
-    session.commit()
-    session.refresh(new_step)
-    return new_step
+# --- Helpers ---
+def is_working_day(dt: datetime) -> bool:
+    return dt.weekday() < 5
 
-@app.patch("/sequences/steps/{step_id}")
-def update_sequence_step(step_id: int, step_data: dict, session: Session = Depends(get_session)):
-    from app.models import SequenceStep
-    step = session.get(SequenceStep, step_id)
-    if not step:
-        raise HTTPException(status_code=404, detail="Step not found")
-    for key, value in step_data.items():
-        setattr(step, key, value)
-    session.add(step)
-    session.commit()
-    session.refresh(step)
-    return step
+def is_within_window(dt: datetime) -> bool:
+    return SEND_START <= dt.time() <= SEND_END
 
-@app.delete("/sequences/steps/{step_id}")
-def delete_sequence_step(step_id: int, session: Session = Depends(get_session)):
-    from app.models import SequenceStep
-    step = session.get(SequenceStep, step_id)
-    if not step:
-        raise HTTPException(status_code=404, detail="Step not found")
-    session.delete(step)
-    session.commit()
-    return {"message": "Step deleted"}
+def get_now_cet():
+    return datetime.now(CET)
 
-# Prospects
-@app.get("/prospects")
-def get_filtered_prospects(
-    search_name: Optional[str] = Query(None),
-    search_email: Optional[str] = Query(None),
-    search_company: Optional[str] = Query(None),
-    sort_by: str = "created_at",
-    sort_order: str = "desc",
-    offset: int = 0,
-    limit: int = 10,
-    session: Session = Depends(get_session)
-):
-    stmt = select(Prospect)
-    if search_name:
-        stmt = stmt.where(Prospect.name.contains(search_name))
-    if search_email:
-        stmt = stmt.where(Prospect.email.contains(search_email))
-    if search_company:
-        stmt = stmt.where(Prospect.company.contains(search_company))
-    order = getattr(getattr(Prospect, sort_by), sort_order)()
-    stmt = stmt.order_by(order).offset(offset).limit(limit)
-    return session.exec(stmt).all()
+def get_random_delay(min_sec=10, max_sec=90):
+    return random.randint(min_sec, max_sec)
 
-@app.post("/prospects")
-def create_prospect_route(prospect: Prospect, session: Session = Depends(get_session)):
-    return create_prospect(session, prospect)
+def count_sent_today(session) -> int:
+    today = get_now_cet().date()
+    results = session.exec(
+        select(SentEmail).where(
+            SentEmail.sent_at >= datetime.combine(today, time.min, tzinfo=CET),
+            SentEmail.status == "sent"
+        )
+    )
+    return len(list(results))
 
-@app.put("/prospects/{prospect_id}")
-def update_prospect_route(prospect_id: int, updated: dict, session: Session = Depends(get_session)):
-    prospect = session.get(Prospect, prospect_id)
-    if not prospect:
-        raise HTTPException(status_code=404, detail="Prospect not found")
-    for key, value in updated.items():
-        setattr(prospect, key, value)
-    session.add(prospect)
-    session.commit()
-    session.refresh(prospect)
-    return prospect
+# --- Scheduler ---
+def run_scheduler():
+    print("Running email scheduler...")
+    with next(get_session()) as session:
+        now = get_now_cet()
 
-@app.delete("/prospects/{prospect_id}")
-def delete_prospect_route(prospect_id: int, session: Session = Depends(get_session)):
-    try:
-        prospect = session.get(Prospect, prospect_id)
-        if not prospect:
-            raise HTTPException(status_code=404, detail="Prospect not found")
-        session.delete(prospect)
+        if not is_working_day(now) or not is_within_window(now):
+            print("Outside allowed CET window.")
+            return "Outside allowed CET window."
+
+        sent_today = count_sent_today(session)
+        if sent_today >= settings.MAX_EMAILS_PER_DAY:
+            print("Daily email limit reached.")
+            return "Daily limit reached."
+
+        pending_emails = session.exec(
+            select(ScheduledEmail).where(
+                ScheduledEmail.send_at <= now,
+                ScheduledEmail.sent_at.is_(None),
+                ScheduledEmail.status == "pending"
+            )
+        ).all()
+
+        count = 0
+        for email in pending_emails:
+            if sent_today >= settings.MAX_EMAILS_PER_DAY:
+                print("Reached limit mid-batch.")
+                break
+
+            prospect = session.get(Prospect, email.prospect_id)
+            template = session.get(EmailTemplate, email.template_id)
+            if not prospect or not template:
+                continue
+
+            time_module.sleep(get_random_delay())
+
+            success = send_email(
+                to_email=prospect.email,
+                subject=template.subject,
+                body=template.body,
+                bcc_email=prospect.email if '@example.com' not in prospect.email else None
+            )
+
+            email.sent_at = get_now_cet()
+
+            if success:
+                email.status = "sent"
+                sent_today += 1
+                status = "sent"
+            else:
+                email.status = "failed"
+                status = "failed"
+
+            sent_record = SentEmail(
+                to=prospect.email,
+                subject=template.subject,
+                body=template.body,
+                sent_at=email.sent_at,
+                status=status,
+                prospect_id=prospect.id
+            )
+
+            session.add(email)
+            session.add(sent_record)
+            count += 1
+
         session.commit()
-        return {"message": "Prospect deleted"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print("Done.")
+        return f"Scheduler processed {count} emails."
 
-# Sequences
-@app.get("/sequences")
-def get_all_sequences(session: Session = Depends(get_session)):
-    return get_sequences(session)
+# --- API Routes ---
+@app.get("/prospects")
+def get_prospects(session: Session = Depends(get_session)):
+    return session.exec(select(Prospect)).all()
 
-@app.post("/sequences")
-def create_sequence_route(sequence: Sequence, session: Session = Depends(get_session)):
-    return create_sequence(session, sequence)
-
-@app.delete("/sequences/{sequence_id}")
-def delete_sequence_route(sequence_id: int, session: Session = Depends(get_session)):
-    sequence = session.get(Sequence, sequence_id)
-    if not sequence:
-        raise HTTPException(status_code=404, detail="Sequence not found")
-    session.delete(sequence)
-    session.commit()
-    return {"message": "Sequence deleted"}
-
-@app.post("/assign-sequence")
-def assign_sequence(req: AssignSequenceRequest, session: Session = Depends(get_session)):
-    for pid in req.prospect_ids:
-        prospect = session.get(Prospect, pid)
-        if prospect:
-            prospect.sequence_id = req.sequence_id
-            session.add(prospect)
-            schedule_sequence_for_prospect(session, prospect_id=pid, sequence_id=req.sequence_id)
-    session.commit()
-    return {"message": "Sequence assigned"}
-
-# Email templates
 @app.get("/templates")
-def get_all_templates(session: Session = Depends(get_session)):
-    return get_templates(session)
+def get_templates_route(session: Session = Depends(get_session)):
+    return session.exec(select(EmailTemplate)).all()
 
-@app.post("/templates")
-def create_template_route(template: EmailTemplateCreate, session: Session = Depends(get_session)):
-    return create_template(session, EmailTemplate(**template.dict()))
+@app.get("/sequences")
+def get_sequences(session: Session = Depends(get_session)):
+    return session.exec(select(Sequence)).all()
 
-@app.put("/templates/{template_id}")
-def update_template_route(template_id: int, template: EmailTemplateUpdate, session: Session = Depends(get_session)):
-    return update_template(session, template_id, template)
-
-@app.delete("/templates/{template_id}")
-def delete_template_route(template_id: int, session: Session = Depends(get_session)):
-    from app.models import EmailTemplate
-    template = session.get(EmailTemplate, template_id)
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-    session.delete(template)
-    session.commit()
-    return {"message": "Template deleted"}
-
-# Test email
 @app.post("/send-test")
 def send_test_email(payload: TestEmailRequest):
     try:
-        send_email(to_address=payload.email, subject=payload.subject, html_body=payload.body)
+        send_email(
+            to_email=payload.email,
+            subject=payload.subject,
+            body=payload.body
+        )
         return {"message": "Test email sent"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/run-scheduler")
+def run_scheduler_api():
+    result = run_scheduler()
+    return JSONResponse(content={"message": result})
+
+@app.get("/sent-emails")
+def get_sent_emails(session: Session = Depends(get_session)):
+    return session.exec(select(SentEmail).order_by(SentEmail.sent_at.desc())).all()
+
+@app.get("/analytics/summary")
+def analytics_summary(session: Session = Depends(get_session)):
+    try:
+        now = get_now_cet()
+        today_start = datetime.combine(now.date(), time.min, tzinfo=CET)
+
+        all = session.exec(select(SentEmail)).all()
+        total_sent = len([e for e in all if e.status == "sent"])
+        total_opened = len([e for e in all if e.status == "opened"])
+        total_failed = len([e for e in all if e.status == "failed"])
+
+        # Handle both naive and aware datetime comparisons
+        def is_today(e):
+            if not e.sent_at:
+                return False
+            if e.sent_at.tzinfo is None:
+                aware_time = e.sent_at.replace(tzinfo=CET)
+            else:
+                aware_time = e.sent_at
+            return aware_time >= today_start
+
+        sent_today = len([e for e in all if is_today(e)])
+        open_rate = round((total_opened / total_sent) * 100, 1) if total_sent else 0
+
+        recent = sorted(all, key=lambda x: x.sent_at or datetime.min, reverse=True)[:5]
+
+        return {
+            "total_sent": total_sent,
+            "total_opened": total_opened,
+            "total_failed": total_failed,
+            "sent_today": sent_today,
+            "open_rate": open_rate,
+            "recent": [e.dict() for e in recent]
+        }
+    except Exception as e:
+        print("❌ Error in /analytics/summary:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/unsubscribe")
+def unsubscribe(token: str, session: Session = Depends(get_session)):
+    from app.tracking import serializer
+    try:
+        email = serializer.loads(token)
+        prospect = session.exec(select(Prospect).where(Prospect.email == email)).first()
+        if not prospect:
+            raise HTTPException(status_code=404, detail="Prospect not found")
+        prospect.unsubscribed = True
+        session.add(prospect)
+        session.commit()
+        return HTMLResponse("""
+            <html><body>
+            <h3>You’ve been unsubscribed successfully.</h3>
+            </body></html>
+        """)
+    except Exception:
+        return HTMLResponse("<h3>Invalid or expired unsubscribe link.</h3>", status_code=400)
 

@@ -12,8 +12,9 @@ class Prospect(SQLModel, table=True):
     name: str
     email: str
     company: Optional[str] = None
-    sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")  # NEW: Assigned sequence
+    sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    unsubscribed: bool = Field(default=False)
 
 class EmailTemplate(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -31,7 +32,7 @@ class SequenceStep(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     sequence_id: int = Field(foreign_key="sequence.id")
     template_id: int = Field(foreign_key="emailtemplate.id")
-    delay_days: int  # number of days after previous step
+    delay_days: int
 
 class ScheduledEmail(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -39,9 +40,17 @@ class ScheduledEmail(SQLModel, table=True):
     template_id: int = Field(foreign_key="emailtemplate.id")
     send_at: datetime
     sent_at: Optional[datetime] = None
-    status: str = "pending"  # pending, sent, failed
+    status: str = "pending"
 
-# Additional schemas for CRUD operations
+class SentEmail(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    to: str
+    subject: str
+    body: str
+    sent_at: datetime
+    status: str  # sent, failed, opened, bounced
+    prospect_id: Optional[int] = Field(default=None, foreign_key="prospect.id")
+
 class EmailTemplateCreate(SQLModel):
     name: str
     subject: str
@@ -51,3 +60,4 @@ class EmailTemplateUpdate(SQLModel):
     name: Optional[str] = None
     subject: Optional[str] = None
     body: Optional[str] = None
+
