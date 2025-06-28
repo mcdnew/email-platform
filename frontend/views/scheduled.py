@@ -35,7 +35,7 @@ def show():
                 session.delete(email)
                 session.commit()
                 st.success("Deleted.")
-                st.experimental_rerun()
+                st.rerun()
 
             if cols[1].button("Mark as Sent", key=f"sent_{email.id}"):
                 email.status = "sent"
@@ -43,5 +43,5 @@ def show():
                 session.add(email)
                 session.commit()
                 st.success("Marked as sent.")
-                st.experimental_rerun()
+                st.rerun()
 

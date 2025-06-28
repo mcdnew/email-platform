@@ -9,6 +9,17 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 API_URL = "http://localhost:8000"
 
+STATUS_COLORS = {
+    "scheduled": "🟦 Scheduled",
+    "sent": "🟩 Sent",
+    "failed": "🟥 Failed",
+    "in_progress": "🟧 In Progress",
+    "completed": "⬜️ Completed"
+}
+
+def status_pretty(s):
+    return STATUS_COLORS.get(s, s)
+
 def fetch_sequences():
     resp = requests.get(f"{API_URL}/sequences")
     return resp.json() if resp.ok else []
@@ -21,6 +32,17 @@ def fetch_sequence_map(ids):
             if r.ok:
                 seq_map[sid] = r.json().get("name")
     return seq_map
+
+def fetch_status_for_prospects(prospects):
+    # For demo: if they have sequence_id, call them 'in_progress', else '-'
+    # You could fetch status from backend for more accurate info
+    status = []
+    for p in prospects:
+        if p.get("sequence_id"):
+            status.append("in_progress")
+        else:
+            status.append("-")
+    return status
 
 def show():
     st.title("Prospects")
@@ -139,6 +161,11 @@ def show():
     for p in data:
         p["sequence_name"] = seq_map.get(p.get("sequence_id"), "-")
 
+    # --- Status Column (for color tags) ---
+    status_col = fetch_status_for_prospects(data)
+    for i, p in enumerate(data):
+        p["status"] = status_pretty(status_col[i])
+
     # Create DataFrame
     df = pd.DataFrame(data)
     if df.empty:
@@ -151,7 +178,9 @@ def show():
     gb.configure_side_bar()  # enable sidebar for column toggle & filters
     gb.configure_selection("multiple", use_checkbox=True)
     gb.configure_default_column(editable=True)
+    gb.configure_column("sequence_id", header_name="Seq ID", editable=False)
     gb.configure_column("sequence_name", header_name="Sequence", editable=False)
+    gb.configure_column("status", header_name="Status", editable=False)
     gb.configure_column("id", hide=True)
     grid_options = gb.build()
 
@@ -182,6 +211,56 @@ def show():
     else:
         edited = edited_data
 
+    # --- BULK ACTIONS: Bulk assign, clear, and delete for selected prospects ---
+    if selected:
+        st.markdown(f"**Bulk Actions for {len(selected)} selected prospect(s):**")
+        assign_col, clear_col, delete_col = st.columns([2, 1, 1])
+        with assign_col:
+            seq_options = list(seq_name_to_id.keys())
+            if seq_options:
+                selected_seq = st.selectbox("Assign Sequence", seq_options, key="bulk_assign_seq")
+                if st.button("Assign to Sequence", key="bulk_assign_btn"):
+                    seq_id = seq_name_to_id.get(selected_seq)
+                    if seq_id:
+                        ids = [r['id'] for r in selected]
+                        r = requests.post(f"{API_URL}/assign-sequence", json={"prospect_ids": ids, "sequence_id": seq_id})
+                        if r.ok:
+                            st.success("Assigned successfully")
+                            st.rerun()
+                        else:
+                            err = r.json().get("detail", r.text) if r.content else r.text
+                            st.error(f"Assignment failed: {err}")
+                    else:
+                        st.error("Please select a sequence.")
+            else:
+                st.info("No sequences available to assign.")
+
+        with clear_col:
+            if st.button("Clear Sequence", key="clear_seq_btn"):
+                ids = [r['id'] for r in selected]
+                for pid in ids:
+                    r = requests.put(f"{API_URL}/prospects/{pid}", json={"sequence_id": None})
+                st.success("Sequence cleared for selected")
+                st.rerun()
+
+        with delete_col:
+            if st.button("❌ Delete Selected", key="bulk_delete_btn"):
+                deleted = 0
+                for r in selected:
+                    dr = requests.delete(f"{API_URL}/prospects/{r['id']}")
+                    if dr.ok:
+                        deleted += 1
+                    else:
+                        try:
+                            err = dr.json().get("detail", dr.text)
+                        except Exception:
+                            err = dr.text
+                        st.error(f"Failed to delete prospect {r['id']}: {err}")
+                if deleted:
+                    st.warning(f"Deleted {deleted} prospect(s)")
+                st.rerun()
+    # --- END BULK ACTIONS ---
+
     # Download: Selected or filtered
     if selected:
         df_export = pd.DataFrame(selected)
@@ -206,32 +285,4 @@ def show():
             resp = requests.put(f"{API_URL}/prospects/{row['id']}", json=row)
         st.success("Changes saved")
         st.rerun()
-
-    # Actions on selected rows
-    if selected:
-        st.markdown(f"**{len(selected)} prospect(s) selected**")
-        col1, col2 = st.columns(2)
-        with col1:
-            seq_choice = st.selectbox("Assign Sequence", ["(None)"] + list(seq_name_to_id.keys()))
-            seq_id = seq_name_to_id[seq_choice] if seq_choice != "(None)" else None
-            if st.button("Assign Sequence"):
-                if seq_id:
-                    ids = [r['id'] for r in selected]
-                    r = requests.post(f"{API_URL}/assign-sequence", json={"prospect_ids": ids, "sequence_id": seq_id})
-                    if r.ok:
-                        st.success("Assigned successfully")
-                        st.rerun()
-                    else:
-                        st.error("Assignment failed")
-                else:
-                    st.error("Please select a sequence.")
-        with col2:
-            if st.button("❌ Delete Selected"):
-                deleted = 0
-                for r in selected:
-                    dr = requests.delete(f"{API_URL}/prospects/{r['id']}")
-                    if dr.ok:
-                        deleted += 1
-                st.warning(f"Deleted {deleted} prospect(s)")
-                st.rerun()
 

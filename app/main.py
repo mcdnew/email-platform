@@ -2,7 +2,8 @@
 
 # At the top of main.py
 import os
-from fastapi import FastAPI, HTTPException, Depends, Query, status
+import logging
+from fastapi import FastAPI, HTTPException, Depends, Query, status, Request
 from sqlmodel import Session, select
 from typing import Optional
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -13,8 +14,9 @@ from app.schemas import TestEmailRequest, AssignSequenceRequest
 from app.mailer import send_email
 from app.config import settings
 from app.routes import open_tracking
+from app.dev import router as dev_router
 from app import crud
-
+from app import dev
 import pytz
 import random
 import time as time_module
@@ -22,11 +24,61 @@ from datetime import datetime, time
 
 app = FastAPI()
 app.include_router(open_tracking.router)
+app.include_router(dev_router)
 
 # --- Constants ---
 CET = pytz.timezone("Europe/Paris")
 SEND_START = time(9, 0)
 SEND_END = time(21, 0)
+
+
+#############################################################
+
+# Configure error logger
+ERROR_LOG_PATH = "error_log.txt"
+error_logger = logging.getLogger("error_logger")
+error_logger.setLevel(logging.ERROR)
+if not error_logger.handlers:
+    file_handler = logging.FileHandler(ERROR_LOG_PATH)
+    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    file_handler.setFormatter(formatter)
+    error_logger.addHandler(file_handler)
+
+# Global error handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    # Compose log message with endpoint and params
+    log_msg = (
+        f"URL: {request.url}\n"
+        f"Method: {request.method}\n"
+        f"Error: {repr(exc)}"
+    )
+    error_logger.error(log_msg)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal error occurred."}
+    )
+
+# View error log (dev only)
+@app.get("/error-log")
+def get_error_log():
+    if not os.getenv("DEV_MODE", "false").lower() == "true":
+        raise HTTPException(status_code=403, detail="Not allowed in production")
+    if not os.path.exists(ERROR_LOG_PATH):
+        return {"log": ""}
+    with open(ERROR_LOG_PATH) as f:
+        return {"log": f.read()}
+
+# Clear error log (dev only)
+@app.post("/clear-error-log", status_code=status.HTTP_200_OK)
+def clear_error_log():
+    if not os.getenv("DEV_MODE", "false").lower() == "true":
+        raise HTTPException(status_code=403, detail="Not allowed in production")
+    open(ERROR_LOG_PATH, "w").close()
+    return {"message": "Error log cleared"}
+
+
+#############################################################
 
 # --- Helpers ---
 def is_working_day(dt: datetime) -> bool:
