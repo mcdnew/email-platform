@@ -1,6 +1,4 @@
-### app/crud.py
-# This file implements database-level CRUD operations using SQLModel sessions.
-# It handles operations for prospects, templates, sequences, steps, and scheduling logic.
+# app/crud.py
 
 from sqlmodel import Session, select
 from app.models import Prospect, EmailTemplate, Sequence, SequenceStep, ScheduledEmail, EmailTemplateUpdate
@@ -24,9 +22,11 @@ def update_prospect(session: Session, prospect: Prospect):
 
 def delete_prospect(session: Session, prospect_id: int):
     prospect = session.get(Prospect, prospect_id)
-    if prospect:
-        session.delete(prospect)
-        session.commit()
+    if not prospect:
+        return False
+    session.delete(prospect)
+    session.commit()
+    return True
 
 # Templates
 def create_template(session: Session, template: EmailTemplate):
@@ -37,12 +37,6 @@ def create_template(session: Session, template: EmailTemplate):
 
 def get_templates(session: Session):
     return session.exec(select(EmailTemplate)).all()
-
-def delete_template(session: Session, template_id: int):
-    template = session.get(EmailTemplate, template_id)
-    if template:
-        session.delete(template)
-        session.commit()
 
 def update_template(session: Session, template_id: int, data: EmailTemplateUpdate):
     db_template = session.get(EmailTemplate, template_id)
@@ -55,6 +49,21 @@ def update_template(session: Session, template_id: int, data: EmailTemplateUpdat
     session.commit()
     session.refresh(db_template)
     return db_template
+
+def delete_template(session: Session, template_id: int):
+    # Return False if not found, or if in use
+    template = session.get(EmailTemplate, template_id)
+    if not template:
+        return False
+    # Check for use in steps
+    in_use = session.exec(
+        select(SequenceStep).where(SequenceStep.template_id == template_id)
+    ).first()
+    if in_use:
+        return None  # Signal to API that this template is in use
+    session.delete(template)
+    session.commit()
+    return True
 
 # Sequences
 def create_sequence(session: Session, sequence: Sequence):
@@ -77,11 +86,31 @@ def get_sequence_steps(session: Session, sequence_id: int):
         select(SequenceStep).where(SequenceStep.sequence_id == sequence_id)
     ).all()
 
+def update_sequence_step(session: Session, step_id: int, data):
+    step = session.get(SequenceStep, step_id)
+    if not step:
+        return None
+    data_dict = data.dict(exclude_unset=True)
+    for key, value in data_dict.items():
+        setattr(step, key, value)
+    session.add(step)
+    session.commit()
+    session.refresh(step)
+    return step
+
+def delete_sequence_step(session: Session, step_id: int):
+    step = session.get(SequenceStep, step_id)
+    if not step:
+        return False
+    session.delete(step)
+    session.commit()
+    return True
+
 # Scheduling
 def schedule_sequence_for_prospect(session: Session, prospect_id: int, sequence_id: int):
     steps = get_sequence_steps(session, sequence_id)
     now = datetime.utcnow()
-    for index, step in enumerate(steps):
+    for step in steps:
         send_time = now + timedelta(days=step.delay_days)
         scheduled = ScheduledEmail(
             prospect_id=prospect_id,

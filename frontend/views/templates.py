@@ -1,6 +1,5 @@
 ### frontend/views/templates.py
-# This Streamlit page manages email templates.
-# Supports creating, editing (with preview and dynamic variable support), and deleting templates.
+# Streamlit page for managing email templates and seeing where they're used.
 
 import streamlit as st
 import requests
@@ -17,6 +16,22 @@ def apply_variables(text):
     for key, value in DUMMY_DATA.items():
         text = text.replace(f"{{{{{key}}}}}", value)
     return text
+
+def find_usages(template_id):
+    # Find which sequences/steps reference this template
+    seqs = requests.get(f"{API_URL}/sequences").json()
+    usages = []
+    for seq in seqs:
+        steps = requests.get(f"{API_URL}/sequences/{seq['id']}/steps").json()
+        for step in steps:
+            if step.get("template_id") == template_id:
+                usages.append({
+                    "sequence_id": seq["id"],
+                    "sequence_name": seq["name"],
+                    "step_id": step["id"],
+                    "delay_days": step.get("delay_days", "?")
+                })
+    return usages
 
 def show():
     st.title("Email Templates")
@@ -75,4 +90,13 @@ def show():
                     st.rerun()
                 else:
                     st.error("Failed to delete.")
+
+            # Show usage info:
+            with st.expander("🔎 Where is this template used?"):
+                usages = find_usages(t["id"])
+                if usages:
+                    for u in usages:
+                        st.write(f"Sequence: **{u['sequence_name']}** (ID: {u['sequence_id']}), Step ID: {u['step_id']} (Delay: {u['delay_days']}d)")
+                else:
+                    st.info("Not used in any sequence.")
 

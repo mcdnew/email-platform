@@ -11,7 +11,7 @@ def insert_test_data():
         # 1. Create a test prospect
         prospect = Prospect(
             name="Test User",
-            email="muntianu.claudiu@gmail.com",
+            email="claudiu.muntianu@fordaq.com",
             company="TestCorp"
         )
         session.add(prospect)
