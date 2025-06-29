@@ -162,16 +162,46 @@ def run_scheduler():
         return f"Scheduler processed {count} emails."
 
 # --- API Routes ---
+
 @app.get("/prospects")
 def get_prospects(session: Session = Depends(get_session)):
     prospects = crud.get_prospects(session)
+    # Build mapping: sequence id → name
     sequences = {s.id: s.name for s in session.exec(select(Sequence)).all()}
+    # Build mapping: prospect id → scheduled emails for them
+    scheds = session.exec(select(ScheduledEmail)).all()
+    # Build mapping: sequence id → total steps
+    steps_by_sequence = {}
+    for s in session.exec(select(Sequence)).all():
+        steps = session.exec(select(SequenceStep).where(SequenceStep.sequence_id == s.id)).all()
+        steps_by_sequence[s.id] = len(steps)
+
+    # Build mapping: prospect id → list of their scheduled emails (sorted by send_at)
+    scheduled_by_prospect = {}
+    for se in scheds:
+        scheduled_by_prospect.setdefault(se.prospect_id, []).append(se)
+    for v in scheduled_by_prospect.values():
+        v.sort(key=lambda e: e.send_at or datetime.min)
+
     results = []
     for p in prospects:
         d = p.dict() if hasattr(p, "dict") else dict(p)
-        d["sequence_name"] = sequences.get(p.sequence_id) if p.sequence_id else None
+        seq_id = getattr(p, "sequence_id", None)
+        d["sequence_name"] = sequences.get(seq_id) if seq_id else None
+        # Sequence Progress logic
+        total_steps = steps_by_sequence.get(seq_id, 0) if seq_id else 0
+        scheduled = scheduled_by_prospect.get(p.id, [])
+        # "Done" is count of scheduled emails with sent_at != None or status in (sent/failed)
+        cur_step = sum(1 for e in scheduled if e.status in ("sent", "failed"))
+        # Edge: If no scheduled emails, current step is 0
+        d["sequence_steps_total"] = total_steps
+        d["sequence_step_current"] = cur_step
+        d["sequence_progress_pct"] = int((cur_step / total_steps) * 100) if total_steps else 0
         results.append(d)
     return results
+
+
+
 
 @app.post("/prospects")
 def add_prospect(p: Prospect, session: Session = Depends(get_session)):
@@ -395,6 +425,43 @@ def force_run_scheduler():
         session.commit()
         print("Done.")
         return {"message": f"FORCE scheduler processed {count} emails."}
+        
+        
+@app.get("/prospects/{prospect_id}/timeline")
+def get_prospect_timeline(prospect_id: int, session: Session = Depends(get_session)):
+    # 1. Get the prospect
+    prospect = session.get(Prospect, prospect_id)
+    if not prospect or not prospect.sequence_id:
+        raise HTTPException(status_code=404, detail="Prospect not found or not in a sequence.")
+
+    # 2. Get steps for sequence
+    steps = session.exec(select(SequenceStep).where(SequenceStep.sequence_id == prospect.sequence_id)).all()
+    scheduled = session.exec(
+        select(ScheduledEmail).where(ScheduledEmail.prospect_id == prospect_id)
+    ).all()
+    sent = session.exec(
+        select(SentEmail).where(SentEmail.prospect_id == prospect_id)
+    ).all()
+    template_map = {t.id: t for t in session.exec(select(EmailTemplate)).all()}
+
+    # 3. Combine info
+    timeline = []
+    for idx, step in enumerate(sorted(steps, key=lambda s: s.delay_days)):
+        tmpl = template_map.get(step.template_id)
+        sched = next((s for s in scheduled if s.template_id == step.template_id), None)
+        sent_mail = next((s for s in sent if s.template_id == step.template_id), None)
+        timeline.append({
+            "step_number": idx + 1,
+            "template_name": tmpl.name if tmpl else "N/A",
+            "subject": tmpl.subject if tmpl else "",
+            "scheduled_at": sched.send_at if sched else None,
+            "sent_at": sent_mail.sent_at if sent_mail else None,
+            "status": sent_mail.status if sent_mail else (sched.status if sched else "-"),
+            "opened_at": sent_mail.opened_at if sent_mail and hasattr(sent_mail, "opened_at") else None,
+        })
+    return timeline
+        
+        
 
 # - here ends the test code section    
 

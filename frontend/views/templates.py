@@ -1,7 +1,8 @@
-### frontend/views/templates.py
-# Streamlit page for managing email templates and seeing where they're used.
+# frontend/views/templates.py
+# Streamlit page for managing email templates, live HTML preview, and usage analysis.
 
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 
 API_URL = "http://localhost:8000"
@@ -13,6 +14,7 @@ DUMMY_DATA = {
 }
 
 def apply_variables(text):
+    # Replace {{var}} with dummy values
     for key, value in DUMMY_DATA.items():
         text = text.replace(f"{{{{{key}}}}}", value)
     return text
@@ -40,7 +42,7 @@ def show():
     with st.form("new_template"):
         name = st.text_input("Template Name")
         subject = st.text_input("Subject")
-        body = st.text_area("Body (HTML supported, use {{name}}, {{company}}, etc.)")
+        body = st.text_area("Body (HTML supported, use {{name}}, {{company}}, etc.)", height=300)
 
         if st.form_submit_button("Create Template"):
             resp = requests.post(f"{API_URL}/templates", json={"name": name, "subject": subject, "body": body})
@@ -62,12 +64,13 @@ def show():
         with st.expander(f"{t['name']} (ID: {t['id']})"):
             new_name = st.text_input("Edit Name", value=t["name"], key=f"name_{t['id']}")
             new_subject = st.text_input("Edit Subject", value=t["subject"], key=f"subj_{t['id']}")
-            new_body = st.text_area("Edit Body (HTML supported)", value=t["body"], height=200, key=f"body_{t['id']}")
+            new_body = st.text_area("Edit Body (HTML supported)", value=t["body"], height=220, key=f"body_{t['id']}")
 
             if st.button("Preview", key=f"preview_{t['id']}"):
                 st.markdown("**Preview:**", unsafe_allow_html=True)
                 previewed = apply_variables(new_body)
-                st.markdown(previewed, unsafe_allow_html=True)
+                # Use components.html for full HTML preview (handles <html>, <style>, etc)
+                components.html(previewed, height=650, scrolling=True)
 
             cols = st.columns([1, 1, 1])
             if cols[0].button("Save Changes", key=f"save_{t['id']}"):
@@ -99,4 +102,5 @@ def show():
                         st.write(f"Sequence: **{u['sequence_name']}** (ID: {u['sequence_id']}), Step ID: {u['step_id']} (Delay: {u['delay_days']}d)")
                 else:
                     st.info("Not used in any sequence.")
+
 

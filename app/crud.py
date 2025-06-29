@@ -120,4 +120,54 @@ def schedule_sequence_for_prospect(session: Session, prospect_id: int, sequence_
         )
         session.add(scheduled)
     session.commit()
+    
+# --- Sequence Progress Helper ---
+def get_prospect_sequence_progress(session, prospect_id, sequence_id):
+    """
+    Returns (sent, total) for a prospect's current sequence.
+    """
+    if not sequence_id:
+        return (0, 0)
+    # Count steps in sequence
+    total = session.exec(
+        select(SequenceStep).where(SequenceStep.sequence_id == sequence_id)
+    ).count()
+    # Count sent scheduled emails for this prospect and sequence's steps
+    step_ids = [step.id for step in session.exec(select(SequenceStep).where(SequenceStep.sequence_id == sequence_id))]
+    sent = session.exec(
+        select(ScheduledEmail).where(
+            ScheduledEmail.prospect_id == prospect_id,
+            ScheduledEmail.template_id.in_(
+                [step.template_id for step in session.exec(select(SequenceStep).where(SequenceStep.sequence_id == sequence_id))]
+            ),
+            ScheduledEmail.status == "sent"
+        )
+    ).count()
+    return (sent, total)
+
+# added
+
+def get_prospect_sequence_progress(session, prospect_id, sequence_id):
+    """
+    Returns (sent, total) for a prospect's current sequence.
+    """
+    if not sequence_id:
+        return (0, 0)
+    # All steps for this sequence
+    steps = list(session.exec(select(SequenceStep).where(SequenceStep.sequence_id == sequence_id)))
+    total = len(steps)
+    if total == 0:
+        return (0, 0)
+    template_ids = [s.template_id for s in steps]
+    # Sent scheduled emails for this prospect and those templates
+    sent_emails = list(session.exec(
+        select(ScheduledEmail).where(
+            ScheduledEmail.prospect_id == prospect_id,
+            ScheduledEmail.template_id.in_(template_ids),
+            ScheduledEmail.status == "sent"
+        )
+    ))
+    sent = len(sent_emails)
+    return (sent, total)
+    
 

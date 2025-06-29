@@ -1,11 +1,10 @@
-### frontend/views/prospects.py
-# This Streamlit page manages prospects.
-# Uses Ag-Grid for scalable viewing/editing with export, column toggle, pagination, CRUD, and sequence assignment.
+# frontend/views/prospects.py
+# This Streamlit page manages prospects with Ag-Grid, CRUD, sequence assignment, status colors, visual progress, and a sidebar sequence timeline.
 
 import streamlit as st
 import pandas as pd
 import requests
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
 API_URL = "http://localhost:8000"
 
@@ -24,25 +23,39 @@ def fetch_sequences():
     resp = requests.get(f"{API_URL}/sequences")
     return resp.json() if resp.ok else []
 
-def fetch_sequence_map(ids):
-    seq_map = {}
-    for sid in ids:
-        if sid:
-            r = requests.get(f"{API_URL}/sequences/{sid}")
-            if r.ok:
-                seq_map[sid] = r.json().get("name")
-    return seq_map
+def fetch_sequence_map(ids, all_sequences):
+    return {s["id"]: s["name"] for s in all_sequences if s["id"] in ids}
 
-def fetch_status_for_prospects(prospects):
-    # For demo: if they have sequence_id, call them 'in_progress', else '-'
-    # You could fetch status from backend for more accurate info
-    status = []
+def fetch_status_and_progress(prospects):
+    statuses = []
+    progresses = []
+    progress_texts = []
     for p in prospects:
-        if p.get("sequence_id"):
-            status.append("in_progress")
+        seq_id = p.get("sequence_id")
+        step_cur = p.get("sequence_step_current", 0) or 0
+        step_total = p.get("sequence_steps_total", 0) or 0
+        if seq_id and step_total == 0:
+            statuses.append("in_progress")
+        elif seq_id and step_cur == step_total and step_total > 0:
+            statuses.append("completed")
+        elif seq_id:
+            statuses.append("in_progress")
         else:
-            status.append("-")
-    return status
+            statuses.append("-")
+        pct = int((step_cur / step_total) * 100) if step_total else 0
+        progresses.append(pct)
+        progress_texts.append(f"Step {step_cur} of {step_total}" if step_total else "-")
+    return statuses, progresses, progress_texts
+
+REAL_PROSPECT_FIELDS = {"id", "name", "email", "company", "title", "sequence_id"}
+
+def clean_row(row):
+    result = {}
+    for k in REAL_PROSPECT_FIELDS:
+        v = row.get(k)
+        if v is not None and not (isinstance(v, float) and (pd.isna(v) or v == float('inf') or v == float('-inf'))):
+            result[k] = v
+    return result
 
 def show():
     st.title("Prospects")
@@ -87,7 +100,6 @@ def show():
         df_csv = pd.read_csv(uploaded_file)
         st.write("Preview:", df_csv.head())
         cols = list(df_csv.columns)
-        # Let user map CSV columns
         name_col = st.selectbox("Name column", cols, index=cols.index("name") if "name" in cols else 0)
         email_col = st.selectbox("Email column", cols, index=cols.index("email") if "email" in cols else 0)
         title_col = st.selectbox("Title column", ["(None)"] + cols, index=(cols.index("title") + 1) if "title" in cols else 0)
@@ -106,7 +118,6 @@ def show():
                     payload["title"] = row[title_col]
                 if company_col != "(None)":
                     payload["company"] = row[company_col]
-                # Sequence logic
                 sequence_id = None
                 if seq_name_col != "(None)":
                     sequence_id = seq_name_to_id.get(str(row[seq_name_col]).strip())
@@ -157,35 +168,57 @@ def show():
 
     # Map sequence names
     seq_ids = list({p.get("sequence_id") for p in data if p.get("sequence_id")})
-    seq_map = fetch_sequence_map(seq_ids)
+    seq_map = fetch_sequence_map(seq_ids, sequences)
     for p in data:
         p["sequence_name"] = seq_map.get(p.get("sequence_id"), "-")
 
-    # --- Status Column (for color tags) ---
-    status_col = fetch_status_for_prospects(data)
+    # --- Status/Progress Columns ---
+    status_col, progress_pcts, progress_texts = fetch_status_and_progress(data)
     for i, p in enumerate(data):
         p["status"] = status_pretty(status_col[i])
+        p["progress_pct"] = progress_pcts[i]
+        p["sequence_progress"] = progress_texts[i]
 
-    # Create DataFrame
-    df = pd.DataFrame(data)
-    if df.empty:
-        st.info("No prospects found.")
-        return
+    # --- EMPTY DATA PROTECTION ---
+    if not data or len(data) == 0:
+        st.info("No prospects found. Add or import some to begin.")
+        return  
 
-    # Configure Ag-Grid
-    gb = GridOptionsBuilder.from_dataframe(df)
+    # --- Ag-Grid Progress Bar JS ---
+    progress_bar_js = JsCode('''
+    function(params) {
+        if (params.value === undefined || params.value === null || isNaN(params.value)) {
+            return '';
+        }
+        var pct = params.value;
+        var bg = pct === 100 ? '#66bb6a' : (pct > 0 ? '#ffa726' : '#e0e0e0');
+        return `<div style='width:100%; background:#eee; border-radius:6px; height:18px; position:relative;'>
+            <div style='background:${bg}; width:${pct}%; height:100%; border-radius:6px;'></div>
+            <div style='position:absolute; left:0; top:0; width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:13px;'>${pct}%</div>
+        </div>`;
+    }
+    ''')
+
+    gb = GridOptionsBuilder.from_dataframe(pd.DataFrame(data))
     gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=20)
-    gb.configure_side_bar()  # enable sidebar for column toggle & filters
+    gb.configure_side_bar()
     gb.configure_selection("multiple", use_checkbox=True)
     gb.configure_default_column(editable=True)
+    gb.configure_column("id", header_name="ID", editable=False)
     gb.configure_column("sequence_id", header_name="Seq ID", editable=False)
     gb.configure_column("sequence_name", header_name="Sequence", editable=False)
+    gb.configure_column("sequence_progress", header_name="Progress", editable=False)
+    gb.configure_column("progress_pct", header_name="Progress %", editable=False, cellRenderer=progress_bar_js)
     gb.configure_column("status", header_name="Status", editable=False)
-    gb.configure_column("id", hide=True)
     grid_options = gb.build()
 
+    columns_to_show = [
+        "id", "name", "email", "sequence_id", "sequence_name", "sequence_progress", "progress_pct", "status", "title", "company"
+    ]
+    df_display = pd.DataFrame(data)[[c for c in columns_to_show if c in pd.DataFrame(data).columns]]
+
     grid_response = AgGrid(
-        df,
+        df_display,
         gridOptions=grid_options,
         update_mode=GridUpdateMode.MODEL_CHANGED,
         enable_enterprise_modules=True,
@@ -210,6 +243,26 @@ def show():
         edited = []
     else:
         edited = edited_data
+
+    # --- TIMELINE SIDEBAR ---
+    if len(selected) == 1:
+        p = selected[0]
+        st.sidebar.markdown(f"### Timeline for {p['name']} (ID: {p['id']})")
+        with st.spinner("Loading timeline..."):
+            resp = requests.get(f"{API_URL}/prospects/{p['id']}/timeline")
+            if resp.ok:
+                timeline = resp.json()
+                for step in timeline:
+                    st.sidebar.markdown(f"""
+                    **Step {step['step_number']}: {step['template_name']}**  
+                    Subject: `{step.get('subject', '')}`  
+                    Scheduled: {step.get('scheduled_at', '-')}  
+                    Sent: {step.get('sent_at', '-')}  
+                    Status: {STATUS_COLORS.get(step['status'], step['status'])}  
+                    Opened: {step.get('opened_at', '-')}
+                    """)
+            else:
+                st.sidebar.error("Failed to load timeline.")
 
     # --- BULK ACTIONS: Bulk assign, clear, and delete for selected prospects ---
     if selected:
@@ -282,7 +335,8 @@ def show():
     # Save edits
     if st.button("💾 Save Changes"):
         for row in edited:
-            resp = requests.put(f"{API_URL}/prospects/{row['id']}", json=row)
+            payload = clean_row(row)
+            resp = requests.put(f"{API_URL}/prospects/{row['id']}", json=payload)
         st.success("Changes saved")
         st.rerun()
 
