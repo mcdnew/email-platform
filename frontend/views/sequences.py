@@ -1,13 +1,10 @@
-### frontend/views/sequences.py
-# This Streamlit page allows users to manage email sequences.
-# It includes sequence creation, renaming, deleting, and inline editing of steps (delay and template ID).
+# frontend/views/sequences.py
 
 import streamlit as st
 import requests
 
 API_URL = "http://localhost:8000"
 
-# Status color/emoji tags for steps (future-proof, in case you want to track step status)
 STEP_STATUS_COLORS = {
     "scheduled": "🟦 Scheduled",
     "sent": "🟩 Sent",
@@ -16,10 +13,12 @@ STEP_STATUS_COLORS = {
     "completed": "⬜️ Completed"
 }
 
+@st.cache_data(ttl=60)
 def fetch_templates():
     resp = requests.get(f"{API_URL}/templates")
     return resp.json() if resp.ok else []
 
+@st.cache_data(ttl=60)
 def fetch_sequences():
     resp = requests.get(f"{API_URL}/sequences")
     return resp.json() if resp.ok else []
@@ -34,6 +33,7 @@ def show():
             resp = requests.post(f"{API_URL}/sequences", json={"name": seq_name})
             if resp.status_code == 200:
                 st.success("Sequence created")
+                st.cache_data.clear()
                 st.rerun()
             else:
                 st.error("Failed to create sequence")
@@ -52,6 +52,7 @@ def show():
                 r = requests.patch(f"{API_URL}/sequences/{seq['id']}", json={"name": new_name})
                 if r.status_code == 200:
                     st.success("Sequence name updated")
+                    st.cache_data.clear()
                     st.rerun()
                 else:
                     st.error("Failed to update sequence name")
@@ -59,6 +60,7 @@ def show():
                 r = requests.delete(f"{API_URL}/sequences/{seq['id']}")
                 if r.status_code == 200:
                     st.success("Sequence deleted")
+                    st.cache_data.clear()
                     st.rerun()
                 else:
                     err = r.json().get("detail", r.text) if r.content else r.text
@@ -76,9 +78,7 @@ def show():
                 step_cols = st.columns([1, 2, 1, 1, 1])
                 delay_key = f"delay_{step['id']}"
                 tmpl_key = f"tmpl_{step['id']}"
-                # Step status: can be improved if you track per-step status on backend
                 status = step.get("status", "scheduled")
-                # Show color tag
                 step_cols[0].markdown(STEP_STATUS_COLORS.get(status, status))
                 delay_val = step_cols[1].number_input(
                     "Delay (days)", value=int(step["delay_days"]), min_value=0, key=delay_key
@@ -99,6 +99,7 @@ def show():
                         })
                         if r.status_code == 200:
                             st.success("Step updated")
+                            st.cache_data.clear()
                             st.rerun()
                         else:
                             err = r.json().get("detail", r.text) if r.content else r.text
@@ -107,6 +108,7 @@ def show():
                     r = requests.delete(f"{API_URL}/sequences/steps/{step['id']}")
                     if r.status_code == 200:
                         st.success("Step deleted")
+                        st.cache_data.clear()
                         st.rerun()
                     else:
                         err = r.json().get("detail", r.text) if r.content else r.text
@@ -128,6 +130,7 @@ def show():
                         })
                         if r.status_code == 200:
                             st.success("Step added")
+                            st.cache_data.clear()
                             st.rerun()
                         else:
                             err = r.json().get("detail", r.text) if r.content else r.text

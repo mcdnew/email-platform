@@ -14,23 +14,25 @@ STATUS_COLORS = {
     "completed": "⬜️ Completed"
 }
 
+@st.cache_data(ttl=60)
 def fetch_templates():
     resp = requests.get(f"{API_URL}/templates")
     return resp.json() if resp.ok else []
 
+@st.cache_data(ttl=60)
 def fetch_sequences():
     resp = requests.get(f"{API_URL}/sequences")
+    return resp.json() if resp.ok else []
+
+@st.cache_data(ttl=60)
+def fetch_sent_emails():
+    resp = requests.get(f"{API_URL}/sent-emails")
     return resp.json() if resp.ok else []
 
 def show():
     st.title("📬 Sent Emails Log")
 
-    resp = requests.get(f"{API_URL}/sent-emails")
-    if resp.status_code != 200:
-        st.error("Failed to fetch sent emails")
-        return
-
-    data = resp.json()
+    data = fetch_sent_emails()
     if not data:
         st.info("No emails have been sent yet.")
         return

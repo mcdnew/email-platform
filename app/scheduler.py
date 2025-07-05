@@ -3,8 +3,6 @@
 from sqlmodel import select
 from datetime import datetime, time
 import pytz
-import random
-import time as time_module
 
 from app.database import get_session
 from app.models import ScheduledEmail, Prospect, EmailTemplate, SentEmail
@@ -12,25 +10,31 @@ from app.mailer import send_email
 from app.config import settings
 
 CET = pytz.timezone("Europe/Paris")
-SEND_START = time(9, 0)
-SEND_END = time(21, 0)
-
+SEND_START = time(0, 0)
+SEND_END = time(23, 59)
 
 def is_working_day(dt: datetime) -> bool:
     return dt.weekday() < 5  # Mon-Fri
 
+#def is_within_window(dt: datetime) -> bool:
+#    return SEND_START <= dt.time() <= SEND_END
+
 def is_within_window(dt: datetime) -> bool:
-    return SEND_START <= dt.time() <= SEND_END
+    return True  # <-- Always true for testing
 
 def get_now_cet():
     return datetime.now(CET)
 
-def get_random_delay(min_sec=10, max_sec=90):
-    return random.randint(min_sec, max_sec)
 
 def count_sent_today(session) -> int:
     today = get_now_cet().date()
     return session.exec(
+        select(func.count()).select_from(SentEmail).where(
+            SentEmail.sent_at >= datetime.combine(today, time.min, tzinfo=CET),
+            SentEmail.status == "sent"
+        )
+    ).scalar_one()
+
         select(SentEmail).where(
             SentEmail.sent_at >= datetime.combine(today, time.min, tzinfo=CET),
             SentEmail.status == "sent"
@@ -69,17 +73,22 @@ def run_scheduler():
             if not prospect or not template:
                 continue
 
-            time_module.sleep(get_random_delay())
+            context = {
+                "name": prospect.name,
+                "email": prospect.email,
+                "company": prospect.company or "",
+                "title": prospect.title or ""
+            }
 
             success = send_email(
                 to_email=prospect.email,
                 subject=template.subject,
                 body=template.body,
-                bcc_email=prospect.email if '@example.com' not in prospect.email else None
+                bcc_email=prospect.email if '@example.com' not in prospect.email else None,
+                context=context
             )
 
             email.sent_at = datetime.utcnow()
-
             if success:
                 email.status = "sent"
                 sent_today += 1

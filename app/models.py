@@ -50,6 +50,8 @@ class SentEmail(SQLModel, table=True):
     sent_at: datetime
     status: str  # sent, failed, opened, bounced
     prospect_id: Optional[int] = Field(default=None, foreign_key="prospect.id")
+    template_id: Optional[int] = Field(default=None, foreign_key="emailtemplate.id")  # <-- ADD THIS
+    sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")      # <-- OPTIONAL: if you need sequence info
 
 class EmailTemplateCreate(SQLModel):
     name: str

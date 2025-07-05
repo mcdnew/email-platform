@@ -128,6 +128,46 @@ def reset_all_hard(session: Session = Depends(get_session)):
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=f"TRUNCATE failed: {e}")
+        
+        
+@router.post("/insert-test-prospect")
+def insert_test_prospect(session: Session = Depends(get_session)):
+    """
+    Insert a test prospect, template, and scheduled email (for UI test/dev).
+    Only allowed in DEV_MODE.
+    """
+    from datetime import datetime
+    dev_only()
+    prospect = Prospect(
+        name="Test User",
+        email="claudiu.muntianu@fordaq.com",
+        company="TestCorp"
+    )
+    session.add(prospect)
+    session.commit()
+    session.refresh(prospect)
+
+    template = EmailTemplate(
+        name="Test Template",
+        subject="Scheduled Email Test",
+        body="<p>Hello {{name}}, this is a scheduled email test.</p>"
+    )
+    session.add(template)
+    session.commit()
+    session.refresh(template)
+
+    scheduled = ScheduledEmail(
+        prospect_id=prospect.id,
+        template_id=template.id,
+        send_at=datetime.utcnow(),
+        status="pending"
+    )
+    session.add(scheduled)
+    session.commit()
+
+    return {"message": "Test prospect, template, and scheduled email inserted."}
+        
+        
 
 # --- (Extend with error log or more dev endpoints as needed) ---
 

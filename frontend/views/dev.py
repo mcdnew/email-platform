@@ -130,4 +130,18 @@ def show():
             st.rerun()
         else:
             st.error(f"Failed: {resp.text}")
+            
+            
+    st.divider()
+    st.subheader("Insert Example Test Prospect (with scheduled email)")
+
+    if st.button("➕ Insert Test Prospect/Email"):
+        resp = requests.post(f"{API_URL}/dev/insert-test-prospect")
+        if resp.ok:
+            st.success("Test prospect, template, and scheduled email inserted!")
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.error(f"Failed: {resp.text}")
+        
 

@@ -1,12 +1,39 @@
 # email-platform/app/mailer.py
-# 📄 File: app/mailer.py
-
+# 📄 Updated to support {{placeholder}} rendering using Prospect data
 
 import smtplib
 from email.mime.text import MIMEText
+from jinja2 import Template, StrictUndefined
+from jinja2.exceptions import UndefinedError
 from app.config import settings
 
-def send_email(to_email: str, subject: str, body: str, bcc_email: str = None) -> bool:
+
+def render_template(text: str, context: dict) -> str:
+    """
+    Replace {{placeholders}} using Jinja2 and prospect context.
+    """
+    try:
+        template = Template(text, undefined=StrictUndefined)
+        return template.render(**context)
+    except UndefinedError as e:
+        print(f"⚠️ Template rendering error: {e}")
+        return text  # Fallback to original text
+
+
+def send_email(
+    to_email: str,
+    subject: str,
+    body: str,
+    bcc_email: str = None,
+    context: dict = None  # Prospect fields
+) -> bool:
+    """
+    Sends an email using SMTP with optional context-based rendering.
+    """
+    if context:
+        subject = render_template(subject, context)
+        body = render_template(body, context)
+
     msg = MIMEText(body, "html")
     msg["Subject"] = subject
     msg["From"] = settings.SMTP_USER

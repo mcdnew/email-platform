@@ -1,9 +1,10 @@
 # 📄 File: app/main.py (modernized, names in API)
 
-# At the top of main.py
+# 📄 File: app/main.py
+
 import os
 import logging
-from fastapi import FastAPI, HTTPException, Depends, Query, status, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from sqlmodel import Session, select
 from typing import Optional
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -16,10 +17,7 @@ from app.config import settings
 from app.routes import open_tracking
 from app.dev import router as dev_router
 from app import crud
-from app import dev
 import pytz
-import random
-import time as time_module
 from datetime import datetime, time
 
 app = FastAPI()
@@ -28,13 +26,12 @@ app.include_router(dev_router)
 
 # --- Constants ---
 CET = pytz.timezone("Europe/Paris")
-SEND_START = time(9, 0)
-SEND_END = time(21, 0)
+
+SEND_START = time(0, 0)
+SEND_END = time(23, 59)
 
 
-#############################################################
-
-# Configure error logger
+# --- Error Logging ---
 ERROR_LOG_PATH = "error_log.txt"
 error_logger = logging.getLogger("error_logger")
 error_logger.setLevel(logging.ERROR)
@@ -44,22 +41,12 @@ if not error_logger.handlers:
     file_handler.setFormatter(formatter)
     error_logger.addHandler(file_handler)
 
-# Global error handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    # Compose log message with endpoint and params
-    log_msg = (
-        f"URL: {request.url}\n"
-        f"Method: {request.method}\n"
-        f"Error: {repr(exc)}"
-    )
+    log_msg = f"URL: {request.url}\nMethod: {request.method}\nError: {repr(exc)}"
     error_logger.error(log_msg)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "An internal error occurred."}
-    )
+    return JSONResponse(status_code=500, content={"detail": "An internal error occurred."})
 
-# View error log (dev only)
 @app.get("/error-log")
 def get_error_log():
     if not os.getenv("DEV_MODE", "false").lower() == "true":
@@ -69,29 +56,26 @@ def get_error_log():
     with open(ERROR_LOG_PATH) as f:
         return {"log": f.read()}
 
-# Clear error log (dev only)
-@app.post("/clear-error-log", status_code=status.HTTP_200_OK)
+@app.post("/clear-error-log")
 def clear_error_log():
     if not os.getenv("DEV_MODE", "false").lower() == "true":
         raise HTTPException(status_code=403, detail="Not allowed in production")
     open(ERROR_LOG_PATH, "w").close()
     return {"message": "Error log cleared"}
 
-
-#############################################################
-
 # --- Helpers ---
 def is_working_day(dt: datetime) -> bool:
     return dt.weekday() < 5
 
+#def is_within_window(dt: datetime) -> bool:
+#    return SEND_START <= dt.time() <= SEND_END
+
 def is_within_window(dt: datetime) -> bool:
-    return SEND_START <= dt.time() <= SEND_END
+    return True  # <-- Always true for testing
+
 
 def get_now_cet():
     return datetime.now(CET)
-
-def get_random_delay(min_sec=10, max_sec=90):
-    return random.randint(min_sec, max_sec)
 
 def count_sent_today(session) -> int:
     today = get_now_cet().date()
@@ -125,33 +109,34 @@ def run_scheduler():
         count = 0
         for email in pending_emails:
             if sent_today >= settings.MAX_EMAILS_PER_DAY:
-                print("Reached limit mid-batch.")
                 break
             prospect = session.get(Prospect, email.prospect_id)
             template = session.get(EmailTemplate, email.template_id)
             if not prospect or not template:
                 continue
-            time_module.sleep(get_random_delay())
+            context = {
+                "name": prospect.name,
+                "email": prospect.email,
+                "company": prospect.company or "",
+                "title": prospect.title or ""
+            }
+            # No sleep or delay!
             success = send_email(
                 to_email=prospect.email,
                 subject=template.subject,
                 body=template.body,
-                bcc_email=prospect.email if '@example.com' not in prospect.email else None
+                bcc_email=prospect.email if '@example.com' not in prospect.email else None,
+                context=context
             )
             email.sent_at = datetime.utcnow()
-            if success:
-                email.status = "sent"
-                sent_today += 1
-                status = "sent"
-            else:
-                email.status = "failed"
-                status = "failed"
+            email.status = "sent" if success else "failed"
+            sent_today += 1 if success else 0
             sent_record = SentEmail(
                 to=prospect.email,
                 subject=template.subject,
                 body=template.body,
                 sent_at=email.sent_at,
-                status=status,
+                status=email.status,
                 prospect_id=prospect.id
             )
             session.add(email)
@@ -160,6 +145,57 @@ def run_scheduler():
         session.commit()
         print("Done.")
         return f"Scheduler processed {count} emails."
+
+@app.post("/run-scheduler")
+def run_scheduler_api():
+    result = run_scheduler()
+    return JSONResponse(content={"message": result})
+
+@app.post("/force-scheduler")
+def force_run_scheduler():
+    print("Running scheduler in FORCE mode (ignoring limits)")
+    with next(get_session()) as session:
+        pending_emails = session.exec(
+            select(ScheduledEmail).where(
+                ScheduledEmail.sent_at.is_(None),
+                ScheduledEmail.status == "pending"
+            )
+        ).all()
+        count = 0
+        for email in pending_emails:
+            prospect = session.get(Prospect, email.prospect_id)
+            template = session.get(EmailTemplate, email.template_id)
+            if not prospect or not template:
+                continue
+            context = {
+                "name": prospect.name,
+                "email": prospect.email,
+                "company": prospect.company or "",
+                "title": prospect.title or ""
+            }
+            success = send_email(
+                to_email=prospect.email,
+                subject=template.subject,
+                body=template.body,
+                bcc_email=prospect.email if '@example.com' not in prospect.email else None,
+                context=context
+            )
+            email.sent_at = datetime.utcnow()
+            email.status = "sent" if success else "failed"
+            sent_record = SentEmail(
+                to=prospect.email,
+                subject=template.subject,
+                body=template.body,
+                sent_at=email.sent_at,
+                status=email.status,
+                prospect_id=prospect.id
+            )
+            session.add(email)
+            session.add(sent_record)
+            count += 1
+        session.commit()
+        print("Done.")
+        return {"message": f"FORCE scheduler processed {count} emails."}
 
 # --- API Routes ---
 
@@ -191,17 +227,12 @@ def get_prospects(session: Session = Depends(get_session)):
         # Sequence Progress logic
         total_steps = steps_by_sequence.get(seq_id, 0) if seq_id else 0
         scheduled = scheduled_by_prospect.get(p.id, [])
-        # "Done" is count of scheduled emails with sent_at != None or status in (sent/failed)
         cur_step = sum(1 for e in scheduled if e.status in ("sent", "failed"))
-        # Edge: If no scheduled emails, current step is 0
         d["sequence_steps_total"] = total_steps
         d["sequence_step_current"] = cur_step
         d["sequence_progress_pct"] = int((cur_step / total_steps) * 100) if total_steps else 0
         results.append(d)
     return results
-
-
-
 
 @app.post("/prospects")
 def add_prospect(p: Prospect, session: Session = Depends(get_session)):
@@ -225,10 +256,12 @@ def delete_prospect(prospect_id: int, session: Session = Depends(get_session)):
 
 @app.post("/assign-sequence")
 def assign_sequence(data: AssignSequenceRequest, session: Session = Depends(get_session)):
+    # Validate prospect existence
     for pid in data.prospect_ids:
         if not session.get(Prospect, pid):
             raise HTTPException(status_code=404, detail=f"Prospect {pid} not found")
-        crud.schedule_sequence_for_prospect(session, pid, data.sequence_id)
+    # Call new global bulk assignment function!
+    crud.bulk_assign_sequence_to_prospects(session, data.prospect_ids, data.sequence_id)
     return {"message": f"Assigned sequence {data.sequence_id} to {len(data.prospect_ids)} prospects"}
 
 # --- Template API ---
@@ -298,7 +331,6 @@ def get_steps_for_sequence(sequence_id: int, session: Session = Depends(get_sess
 
 @app.post("/sequences/{sequence_id}/steps")
 def add_step_to_sequence(sequence_id: int, step: SequenceStep, session: Session = Depends(get_session)):
-    # Defensive: Check that template and sequence exist
     template = session.get(EmailTemplate, step.template_id)
     if not template:
         raise HTTPException(status_code=400, detail=f"Template id {step.template_id} does not exist")
@@ -329,7 +361,6 @@ def get_sent_emails(session: Session = Depends(get_session)):
     sent = session.exec(select(SentEmail).order_by(SentEmail.sent_at.desc())).all()
     templates = {t.id: t.name for t in session.exec(select(EmailTemplate)).all()}
     sequences = {s.id: s.name for s in session.exec(select(Sequence)).all()}
-    # Try to get sequence_id from scheduled email if present
     scheduled_lookup = {e.id: e.sequence_id for e in session.exec(select(ScheduledEmail)).all() if hasattr(e, 'sequence_id')}
     enriched = []
     for e in sent:
@@ -374,6 +405,9 @@ def send_test_email(payload: TestEmailRequest):
         return {"message": "Test email sent"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ... All other endpoints remain unchanged as in your prior file ...
+
 
 @app.post("/run-scheduler")
 def run_scheduler_api():
@@ -427,40 +461,76 @@ def force_run_scheduler():
         return {"message": f"FORCE scheduler processed {count} emails."}
         
         
+from fastapi import HTTPException
+from sqlmodel import select
+# … your other imports …
+
 @app.get("/prospects/{prospect_id}/timeline")
 def get_prospect_timeline(prospect_id: int, session: Session = Depends(get_session)):
-    # 1. Get the prospect
     prospect = session.get(Prospect, prospect_id)
-    if not prospect or not prospect.sequence_id:
-        raise HTTPException(status_code=404, detail="Prospect not found or not in a sequence.")
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Prospect not found.")
 
-    # 2. Get steps for sequence
-    steps = session.exec(select(SequenceStep).where(SequenceStep.sequence_id == prospect.sequence_id)).all()
+    sequence_id = prospect.sequence_id
+
+    # pull in all scheduled emails for this prospect
     scheduled = session.exec(
-        select(ScheduledEmail).where(ScheduledEmail.prospect_id == prospect_id)
+        select(ScheduledEmail)
+        .where(ScheduledEmail.prospect_id == prospect_id)
     ).all()
-    sent = session.exec(
-        select(SentEmail).where(SentEmail.prospect_id == prospect_id)
-    ).all()
-    template_map = {t.id: t for t in session.exec(select(EmailTemplate)).all()}
 
-    # 3. Combine info
-    timeline = []
-    for idx, step in enumerate(sorted(steps, key=lambda s: s.delay_days)):
-        tmpl = template_map.get(step.template_id)
-        sched = next((s for s in scheduled if s.template_id == step.template_id), None)
-        sent_mail = next((s for s in sent if s.template_id == step.template_id), None)
-        timeline.append({
-            "step_number": idx + 1,
-            "template_name": tmpl.name if tmpl else "N/A",
-            "subject": tmpl.subject if tmpl else "",
-            "scheduled_at": sched.send_at if sched else None,
-            "sent_at": sent_mail.sent_at if sent_mail else None,
-            "status": sent_mail.status if sent_mail else (sched.status if sched else "-"),
-            "opened_at": sent_mail.opened_at if sent_mail and hasattr(sent_mail, "opened_at") else None,
-        })
+    # build a quick lookup: template_id → list[ScheduledEmail]
+    sched_by_tmpl: dict[int, list[ScheduledEmail]] = {}
+    for s in scheduled:
+        sched_by_tmpl.setdefault(s.template_id, []).append(s)
+
+    # load templates for names/subjects
+    template_map = {
+        t.id: t for t in session.exec(select(EmailTemplate)).all()
+    }
+
+    timeline: list[dict] = []
+
+    if sequence_id:
+        # for each step in the sequence, pick its scheduled entry
+        steps = session.exec(
+            select(SequenceStep)
+            .where(SequenceStep.sequence_id == sequence_id)
+            .order_by(SequenceStep.delay_days)
+        ).all()
+
+        for idx, step in enumerate(steps, start=1):
+            tmpl = template_map.get(step.template_id)
+            # get the one ScheduledEmail for this step (if any)
+            candidates = sched_by_tmpl.get(step.template_id, [])
+            sched = min(candidates, key=lambda x: x.send_at, default=None)
+
+            timeline.append({
+                "step_number": idx,
+                "template_name": tmpl.name if tmpl else "N/A",
+                "subject": tmpl.subject if tmpl else "",
+                "scheduled_at": sched.send_at if sched else None,
+                "sent_at": sched.sent_at if sched else None,
+                "status": sched.status if sched else "-",
+                # if you have an opened_at column on ScheduledEmail, else this will be None
+                "opened_at": getattr(sched, "opened_at", None) if sched else None,
+            })
+
+    else:
+        # fallback: just list every scheduled email for this prospect
+        for sched in sorted(scheduled, key=lambda x: x.send_at or datetime.min):
+            tmpl = template_map.get(sched.template_id)
+            timeline.append({
+                "step_number": None,
+                "template_name": tmpl.name if tmpl else "N/A",
+                "subject": tmpl.subject if tmpl else "",
+                "scheduled_at": sched.send_at,
+                "sent_at": sched.sent_at,
+                "status": sched.status,
+                "opened_at": getattr(sched, "opened_at", None),
+            })
+
     return timeline
-        
         
 
 # - here ends the test code section    

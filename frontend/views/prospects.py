@@ -1,6 +1,3 @@
-# frontend/views/prospects.py
-# This Streamlit page manages prospects with Ag-Grid, CRUD, sequence assignment, status colors, visual progress, and a sidebar sequence timeline.
-
 import streamlit as st
 import pandas as pd
 import requests
@@ -16,9 +13,10 @@ STATUS_COLORS = {
     "completed": "⬜️ Completed"
 }
 
-def status_pretty(s):
-    return STATUS_COLORS.get(s, s)
+def status_pretty(status):
+    return STATUS_COLORS.get(status, status.capitalize() if status else "-")
 
+@st.cache_data(ttl=60)
 def fetch_sequences():
     resp = requests.get(f"{API_URL}/sequences")
     return resp.json() if resp.ok else []
@@ -44,7 +42,7 @@ def fetch_status_and_progress(prospects):
             statuses.append("-")
         pct = int((step_cur / step_total) * 100) if step_total else 0
         progresses.append(pct)
-        progress_texts.append(f"Step {step_cur} of {step_total}" if step_total else "-")
+        progress_texts.append(f"{step_cur}/{step_total}" if step_total else "-")
     return statuses, progresses, progress_texts
 
 REAL_PROSPECT_FIELDS = {"id", "name", "email", "company", "title", "sequence_id"}
@@ -60,12 +58,12 @@ def clean_row(row):
 def show():
     st.title("Prospects")
 
-    # Fetch sequences for dropdowns
+    # --- Fetch sequences for dropdowns
     sequences = fetch_sequences()
     seq_name_to_id = {s["name"]: s["id"] for s in sequences}
     seq_id_to_name = {s["id"]: s["name"] for s in sequences}
 
-    # Add Prospect
+    # --- Add Prospect
     st.subheader("➕ Add Prospect")
     with st.form("add_prospect"):
         new_name = st.text_input("Name")
@@ -87,13 +85,14 @@ def show():
                 resp = requests.post(f"{API_URL}/prospects", json=payload)
                 if resp.status_code == 200:
                     st.success("Prospect added!")
+                    st.cache_data.clear()
                     st.rerun()
                 else:
                     st.error("Failed to add prospect.")
             else:
                 st.error("Name and Email required.")
 
-    # CSV Import
+    # --- CSV Import
     st.subheader("📥 Import from CSV")
     uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
     if uploaded_file:
@@ -139,32 +138,22 @@ def show():
             if failed:
                 st.warning(f"{len(failed)} failed")
                 st.dataframe(pd.DataFrame(failed))
+            st.cache_data.clear()
             st.rerun()
 
-    # Filters & Sorting
+    # --- Filters & Sorting (manual filtering since API doesn't support it)
     st.subheader("📋 All Prospects")
-    with st.expander("🔍 Filters & Sorting"):
-        search_name = st.text_input("Search by Name")
-        search_email = st.text_input("Search by Email")
-        search_company = st.text_input("Search by Company")
-        sort_by = st.selectbox("Sort by", ["created_at", "name", "email"])
-        sort_order = st.radio("Order", ["asc", "desc"], horizontal=True)
-
     # Fetch prospects
-    params = {
-        "search_name": search_name,
-        "search_email": search_email,
-        "search_company": search_company,
-        "sort_by": sort_by,
-        "sort_order": sort_order,
-        "offset": 0,
-        "limit": 1000
-    }
-    resp = requests.get(f"{API_URL}/prospects", params=params)
+    resp = requests.get(f"{API_URL}/prospects")
     if resp.status_code != 200:
         st.error("Failed to fetch prospects")
         return
     data = resp.json()
+
+    # --- EMPTY DATA PROTECTION ---
+    if not data or len(data) == 0:
+        st.info("No prospects found. Add or import some to begin.")
+        return
 
     # Map sequence names
     seq_ids = list({p.get("sequence_id") for p in data if p.get("sequence_id")})
@@ -178,11 +167,6 @@ def show():
         p["status"] = status_pretty(status_col[i])
         p["progress_pct"] = progress_pcts[i]
         p["sequence_progress"] = progress_texts[i]
-
-    # --- EMPTY DATA PROTECTION ---
-    if not data or len(data) == 0:
-        st.info("No prospects found. Add or import some to begin.")
-        return  
 
     # --- Ag-Grid Progress Bar JS ---
     progress_bar_js = JsCode('''
@@ -199,7 +183,12 @@ def show():
     }
     ''')
 
-    gb = GridOptionsBuilder.from_dataframe(pd.DataFrame(data))
+    columns_to_show = [
+        "id", "name", "email", "sequence_id", "sequence_name", "sequence_progress", "progress_pct", "status", "title", "company"
+    ]
+    df_display = pd.DataFrame(data)[[c for c in columns_to_show if c in pd.DataFrame(data).columns]]
+
+    gb = GridOptionsBuilder.from_dataframe(df_display)
     gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=20)
     gb.configure_side_bar()
     gb.configure_selection("multiple", use_checkbox=True)
@@ -212,11 +201,6 @@ def show():
     gb.configure_column("status", header_name="Status", editable=False)
     grid_options = gb.build()
 
-    columns_to_show = [
-        "id", "name", "email", "sequence_id", "sequence_name", "sequence_progress", "progress_pct", "status", "title", "company"
-    ]
-    df_display = pd.DataFrame(data)[[c for c in columns_to_show if c in pd.DataFrame(data).columns]]
-
     grid_response = AgGrid(
         df_display,
         gridOptions=grid_options,
@@ -227,7 +211,7 @@ def show():
         fit_columns_on_grid_load=True
     )
 
-    # Extract selection (list of dicts) and edited data
+    # Extract selection and edited data
     selected_rows = grid_response.get("selected_rows")
     if isinstance(selected_rows, pd.DataFrame):
         selected = selected_rows.to_dict("records")
@@ -254,17 +238,17 @@ def show():
                 timeline = resp.json()
                 for step in timeline:
                     st.sidebar.markdown(f"""
-                    **Step {step['step_number']}: {step['template_name']}**  
+                    **Step {step.get('step_number','')}**: {step.get('template_name','')}  
                     Subject: `{step.get('subject', '')}`  
                     Scheduled: {step.get('scheduled_at', '-')}  
                     Sent: {step.get('sent_at', '-')}  
-                    Status: {STATUS_COLORS.get(step['status'], step['status'])}  
+                    Status: {STATUS_COLORS.get(step.get('status'), step.get('status'))}  
                     Opened: {step.get('opened_at', '-')}
                     """)
             else:
                 st.sidebar.error("Failed to load timeline.")
 
-    # --- BULK ACTIONS: Bulk assign, clear, and delete for selected prospects ---
+    # --- BULK ACTIONS ---
     if selected:
         st.markdown(f"**Bulk Actions for {len(selected)} selected prospect(s):**")
         assign_col, clear_col, delete_col = st.columns([2, 1, 1])
@@ -279,6 +263,7 @@ def show():
                         r = requests.post(f"{API_URL}/assign-sequence", json={"prospect_ids": ids, "sequence_id": seq_id})
                         if r.ok:
                             st.success("Assigned successfully")
+                            st.cache_data.clear()
                             st.rerun()
                         else:
                             err = r.json().get("detail", r.text) if r.content else r.text
@@ -294,6 +279,7 @@ def show():
                 for pid in ids:
                     r = requests.put(f"{API_URL}/prospects/{pid}", json={"sequence_id": None})
                 st.success("Sequence cleared for selected")
+                st.cache_data.clear()
                 st.rerun()
 
         with delete_col:
@@ -311,10 +297,11 @@ def show():
                         st.error(f"Failed to delete prospect {r['id']}: {err}")
                 if deleted:
                     st.warning(f"Deleted {deleted} prospect(s)")
+                st.cache_data.clear()
                 st.rerun()
     # --- END BULK ACTIONS ---
 
-    # Download: Selected or filtered
+    # --- Download: Selected or filtered
     if selected:
         df_export = pd.DataFrame(selected)
         st.download_button(
@@ -332,11 +319,12 @@ def show():
             mime="text/csv"
         )
 
-    # Save edits
+    # --- Save edits
     if st.button("💾 Save Changes"):
         for row in edited:
             payload = clean_row(row)
             resp = requests.put(f"{API_URL}/prospects/{row['id']}", json=payload)
         st.success("Changes saved")
+        st.cache_data.clear()
         st.rerun()
 

@@ -1,5 +1,4 @@
-# email-platform/frontend/views/dashboard.py
-# 📄 File: frontend/views/dashboard.py (with analytics and force scheduler button)
+# frontend/views/dashboard.py
 
 import streamlit as st
 import pandas as pd
@@ -7,14 +6,17 @@ import requests
 
 API_URL = "http://localhost:8000"
 
+@st.cache_data(ttl=60)
 def fetch_sequences():
     resp = requests.get(f"{API_URL}/sequences")
     return resp.json() if resp.ok else []
 
+@st.cache_data(ttl=60)
 def fetch_templates():
     resp = requests.get(f"{API_URL}/templates")
     return resp.json() if resp.ok else []
 
+@st.cache_data(ttl=60)
 def fetch_sent_emails():
     resp = requests.get(f"{API_URL}/sent-emails")
     return resp.json() if resp.ok else []
