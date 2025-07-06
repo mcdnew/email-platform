@@ -16,7 +16,7 @@ from app.routes import open_tracking
 from app.dev import router as dev_router
 from app import crud
 import pytz
-from datetime import datetime, time
+from datetime import datetime, date, time
 
 app = FastAPI()
 app.include_router(open_tracking.router)
@@ -60,6 +60,7 @@ def clear_error_log():
     open(ERROR_LOG_PATH, "w").close()
     return {"message": "Error log cleared"}
 
+# --- Utility Functions ---
 def is_working_day(dt: datetime) -> bool:
     return dt.weekday() < 5
 
@@ -191,6 +192,7 @@ def force_run_scheduler():
 # --- Prospects API (with support for assigned param) ---
 @app.get("/prospects")
 def get_prospects(assigned: Optional[bool] = None, session: Session = Depends(get_session)):
+    # Filtering prospects by assignment state if param given
     if assigned is None:
         prospects = crud.get_prospects(session)
     elif assigned:
@@ -243,20 +245,21 @@ def delete_prospect(prospect_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Prospect not found")
     return {"message": "Deleted"}
 
-
+# --- Bulk Assign Sequence API (supports start_date and ventilate_days) ---
 @app.post("/assign-sequence")
 def assign_sequence(data: AssignSequenceRequest, session: Session = Depends(get_session)):
     ventilate_days = data.ventilate_days or 1
     # Parse start_date from string or fallback to today
     try:
-        start_date = datetime.datetime.strptime(data.start_date, "%Y-%m-%d").date() if data.start_date else datetime.date.today()
+        # Note: We imported datetime, date, time above
+        start_date = datetime.strptime(data.start_date, "%Y-%m-%d").date() if data.start_date else date.today()
     except Exception:
-        start_date = datetime.date.today()
-    # Validate prospect existence as before...
+        start_date = date.today()
+    # Validate prospect existence
     for pid in data.prospect_ids:
         if not session.get(Prospect, pid):
             raise HTTPException(status_code=404, detail=f"Prospect {pid} not found")
-    # Pass start_date to the bulk assign function!
+    # Assign sequences with scheduling
     crud.bulk_assign_sequence_to_prospects(session, data.prospect_ids, data.sequence_id, ventilate_days, start_date)
     return {"message": f"Assigned sequence {data.sequence_id} to {len(data.prospect_ids)} prospects over {ventilate_days} days starting {start_date}"}
 
@@ -401,40 +404,34 @@ def send_test_email(payload: TestEmailRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- Timeline (per prospect) ---
 @app.get("/prospects/{prospect_id}/timeline")
 def get_prospect_timeline(prospect_id: int, session: Session = Depends(get_session)):
     prospect = session.get(Prospect, prospect_id)
     if not prospect:
         raise HTTPException(status_code=404, detail="Prospect not found.")
-
     sequence_id = prospect.sequence_id
     scheduled = session.exec(
         select(ScheduledEmail)
         .where(ScheduledEmail.prospect_id == prospect_id)
     ).all()
-
     sched_by_tmpl = {}
     for s in scheduled:
         sched_by_tmpl.setdefault(s.template_id, []).append(s)
-
     template_map = {
         t.id: t for t in session.exec(select(EmailTemplate)).all()
     }
-
     timeline = []
-
     if sequence_id:
         steps = session.exec(
             select(SequenceStep)
             .where(SequenceStep.sequence_id == sequence_id)
             .order_by(SequenceStep.delay_days)
         ).all()
-
         for idx, step in enumerate(steps, start=1):
             tmpl = template_map.get(step.template_id)
             candidates = sched_by_tmpl.get(step.template_id, [])
             sched = min(candidates, key=lambda x: x.send_at, default=None)
-
             timeline.append({
                 "step_number": idx,
                 "template_name": tmpl.name if tmpl else "N/A",
@@ -456,7 +453,6 @@ def get_prospect_timeline(prospect_id: int, session: Session = Depends(get_sessi
                 "status": sched.status,
                 "opened_at": getattr(sched, "opened_at", None),
             })
-
     return timeline
 
 @app.get("/unsubscribe")

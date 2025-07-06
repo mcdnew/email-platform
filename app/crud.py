@@ -28,17 +28,11 @@ from app.models import (
 )
 from app.config import settings
 
-
 # --------------------------------------------------------------------------- #
 # Generic helpers
 # --------------------------------------------------------------------------- #
 
-
 def _rows_to_dict(rows: _SeqType) -> list[dict]:
-    """Convert an iterator of SQLModel rows to plain dicts.
-
-    Works both with ORM objects (have ``dict()``) and row tuples.
-    """
     out: list[dict] = []
     for r in rows:
         if hasattr(r, "dict"):
@@ -46,28 +40,23 @@ def _rows_to_dict(rows: _SeqType) -> list[dict]:
         elif hasattr(r, "_mapping"):  # SQLAlchemy Row
             out.append(dict(r._mapping))
         else:
-            # Fallback: try vars()
             try:
                 out.append(vars(r))
             except Exception:
                 continue
     return out
 
-
-def _get_next_working_day(dt: datetime.date):
-    """Return first weekday >= *dt* (Mon-Fri)."""
+def _get_next_working_day(dt: date):
     while dt.weekday() >= 5:
         dt += timedelta(days=1)
     return dt
 
-
 def _random_times_for_window(
-    base_date: datetime.date,
+    base_date: date,
     count: int,
     start_hour: int = 9,
     end_hour: int = 21,
 ) -> list[datetime]:
-    """Return *count* unique datetimes randomly spread inside the window."""
     window_minutes = (end_hour - start_hour) * 60
     if count > window_minutes:
         raise ValueError("More emails than available slots in the window")
@@ -77,11 +66,9 @@ def _random_times_for_window(
         for m in sorted(slots)
     ]
 
-
 # --------------------------------------------------------------------------- #
 # Prospect CRUD
 # --------------------------------------------------------------------------- #
-
 
 def create_prospect(session: Session, prospect: Prospect):
     session.add(prospect)
@@ -89,10 +76,8 @@ def create_prospect(session: Session, prospect: Prospect):
     session.refresh(prospect)
     return prospect
 
-
 def get_prospects(session: Session):
     return session.exec(select(Prospect)).all()
-
 
 def update_prospect(session: Session, prospect: Prospect):
     session.add(prospect)
@@ -100,29 +85,22 @@ def update_prospect(session: Session, prospect: Prospect):
     session.refresh(prospect)
     return prospect
 
-
 def delete_prospect(session: Session, prospect_id: int):
     prospect = session.get(Prospect, prospect_id)
     if not prospect:
         return False
-
     # Cascade-delete all scheduled & sent emails for this prospect
-    session.exec(
-        delete(ScheduledEmail).where(ScheduledEmail.prospect_id == prospect_id)
-    )
-    session.exec(
-        delete(SentEmail).where(SentEmail.prospect_id == prospect_id)
-    )
-
+    for se in session.exec(select(ScheduledEmail).where(ScheduledEmail.prospect_id == prospect_id)).all():
+        session.delete(se)
+    for se in session.exec(select(SentEmail).where(SentEmail.prospect_id == prospect_id)).all():
+        session.delete(se)
     session.delete(prospect)
     session.commit()
     return True
 
-
 # --------------------------------------------------------------------------- #
 # Template CRUD
 # --------------------------------------------------------------------------- #
-
 
 def create_template(session: Session, template: EmailTemplate):
     session.add(template)
@@ -130,10 +108,8 @@ def create_template(session: Session, template: EmailTemplate):
     session.refresh(template)
     return template
 
-
 def get_templates(session: Session):
     return session.exec(select(EmailTemplate)).all()
-
 
 def update_template(session: Session, template_id: int, data: EmailTemplateUpdate):
     tpl = session.get(EmailTemplate, template_id)
@@ -145,7 +121,6 @@ def update_template(session: Session, template_id: int, data: EmailTemplateUpdat
     session.commit()
     session.refresh(tpl)
     return tpl
-
 
 def delete_template(session: Session, template_id: int):
     tpl = session.get(EmailTemplate, template_id)
@@ -160,11 +135,9 @@ def delete_template(session: Session, template_id: int):
     session.commit()
     return True
 
-
 # --------------------------------------------------------------------------- #
 # Sequence + Steps CRUD
 # --------------------------------------------------------------------------- #
-
 
 def create_sequence(session: Session, sequence: Sequence):
     session.add(sequence)
@@ -172,10 +145,8 @@ def create_sequence(session: Session, sequence: Sequence):
     session.refresh(sequence)
     return sequence
 
-
 def get_sequences(session: Session):
     return session.exec(select(Sequence)).all()
-
 
 def create_sequence_step(session: Session, step: SequenceStep):
     session.add(step)
@@ -183,12 +154,10 @@ def create_sequence_step(session: Session, step: SequenceStep):
     session.refresh(step)
     return step
 
-
 def get_sequence_steps(session: Session, sequence_id: int):
     return session.exec(
         select(SequenceStep).where(SequenceStep.sequence_id == sequence_id)
     ).all()
-
 
 def update_sequence_step(session: Session, step_id: int, data):
     step = session.get(SequenceStep, step_id)
@@ -201,7 +170,6 @@ def update_sequence_step(session: Session, step_id: int, data):
     session.refresh(step)
     return step
 
-
 def delete_sequence_step(session: Session, step_id: int):
     step = session.get(SequenceStep, step_id)
     if not step:
@@ -210,14 +178,11 @@ def delete_sequence_step(session: Session, step_id: int):
     session.commit()
     return True
 
-
 # --------------------------------------------------------------------------- #
 # Scheduling helpers
 # --------------------------------------------------------------------------- #
 
-
-def _already_scheduled_on(session: Session, date_: datetime.date) -> int:
-    """Return how many emails are already scheduled for *date_* (00-24h)."""
+def _already_scheduled_on(session: Session, date_: date) -> int:
     start = datetime.combine(date_, time(0, 0))
     end = start + timedelta(days=1)
     return (
@@ -226,23 +191,20 @@ def _already_scheduled_on(session: Session, date_: datetime.date) -> int:
             .select_from(ScheduledEmail)
             .where(ScheduledEmail.send_at >= start, ScheduledEmail.send_at < end)
         )
-        .one()
+        .scalar_one()
     )
-
 
 # --------------------------------------------------------------------------- #
 # Public scheduling API
 # --------------------------------------------------------------------------- #
 
 def bulk_assign_sequence_to_prospects(session, prospect_ids, sequence_id, ventilate_days=1, start_date=None):
-    # start_date: a date object (not datetime), fallback to today
     if start_date is None:
         start_date = date.today()
     # Create send datetimes starting from start_date
     step_1_dates = []
     for i in range(len(prospect_ids)):
         offset = random.randint(0, ventilate_days - 1)
-        # Combine with time.min to get a datetime object at 00:00
         send_date = datetime.combine(start_date, time.min) + timedelta(days=offset)
         step_1_dates.append(send_date)
 
@@ -274,14 +236,11 @@ def bulk_assign_sequence_to_prospects(session, prospect_ids, sequence_id, ventil
             session.add(scheduled_email)
     session.commit()
 
-
-
 def schedule_sequence_for_prospect(session: Session, prospect_id: int, sequence_id: int):
     steps = get_sequence_steps(session, sequence_id)
     if not steps:
         return
     today = datetime.utcnow().date()
-
     for step in steps:
         send_date = _get_next_working_day(today + timedelta(days=step.delay_days))
         already = _already_scheduled_on(session, send_date)
@@ -297,18 +256,15 @@ def schedule_sequence_for_prospect(session: Session, prospect_id: int, sequence_
         session.add(scheduled)
     session.commit()
 
-
 def get_prospect_sequence_progress(session, prospect_id: int, sequence_id: int):
     if not sequence_id:
         return (0, 0)
-
     steps = list(
         session.exec(select(SequenceStep).where(SequenceStep.sequence_id == sequence_id))
     )
     total = len(steps)
     if total == 0:
         return (0, 0)
-
     template_ids = [s.template_id for s in steps]
     sent_count = (
         session.exec(
@@ -320,8 +276,7 @@ def get_prospect_sequence_progress(session, prospect_id: int, sequence_id: int):
                 ScheduledEmail.status == "sent",
             )
         )
-        .one()
+        .scalar_one()
     )
-
     return (sent_count, total)
 
