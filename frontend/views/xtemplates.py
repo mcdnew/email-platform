@@ -1,3 +1,4 @@
+# frontend/views/templates.py
 import streamlit as st
 import streamlit.components.v1 as components
 import requests
@@ -111,9 +112,7 @@ def show():
 
     templates = resp.json()
     for t in templates:
-        t_key = f"expander_tmpl_{t['id']}"
-        expanded = st.session_state.get(t_key, False)
-        with st.expander(f"{t['name']} (ID: {t['id']})", expanded=expanded):
+        with st.expander(f"{t['name']} (ID: {t['id']})"):
             new_name = st.text_input("Edit Name", value=t["name"], key=f"name_{t['id']}")
             new_subject = st.text_input("Edit Subject", value=t["subject"], key=f"subj_{t['id']}")
             new_body = st.text_area("Edit Body", value=t["body"], height=220, key=f"body_{t['id']}")
@@ -123,49 +122,29 @@ def show():
             if invalid_vars:
                 st.warning(f"Unknown placeholders used: {', '.join(invalid_vars)}")
 
-            st.markdown("**Subject Preview:**")
-            rendered_subject = render_with_context(new_subject, context)
-            st.code(rendered_subject, language="text")
+            if st.button("Preview", key=f"preview_{t['id']}"):
+                rendered_subject = render_with_context(new_subject, context)
+                rendered_body = render_with_context(new_body, context)
+                st.markdown(f"**Subject Preview:** `{rendered_subject}`")
+                st.markdown("**Body Preview:**", unsafe_allow_html=True)
+                components.html(rendered_body, height=500, scrolling=True)
 
-            st.markdown("**Body Preview (Text):**")
-            # Strip HTML tags for text version
-            import re
-            plain_text = re.sub(r'<[^>]*>', '', render_with_context(new_body, context))
-            st.code(plain_text, language="text")
-
-            st.markdown("**Body Preview (HTML):**", unsafe_allow_html=True)
-            rendered_body = render_with_context(new_body, context)
-            components.html(rendered_body, height=500, scrolling=True)
-
-            # Always show Send Test section
-            st.markdown("#### ✉️ Send Test Email")
-            test_email = st.text_input("Your email address", key=f"test_email_{t['id']}")
-            if st.button("🚀 Send Test", key=f"test_btn_{t['id']}"):
-                if not test_email or "@" not in test_email:
-                    st.error("Please enter a valid email address.")
-                elif not rendered_subject or not rendered_body:
-                    st.error("Subject and body must not be empty.")
-                else:
+                st.markdown("#### ✉️ Send Test Email")
+                test_email = st.text_input("Your email address", key=f"test_email_{t['id']}")
+                if st.button("🚀 Send Test", key=f"test_btn_{t['id']}"):
                     payload = {
                         "email": test_email,
                         "subject": rendered_subject,
                         "body": rendered_body
                     }
-                    try:
-                        r = requests.post(f"{API_URL}/send-test", json=payload)
-                        if r.status_code == 200:
-                            st.success("Test email sent!")
-                        else:
-                            try:
-                                err_detail = r.json().get("detail", r.text)
-                            except Exception:
-                                err_detail = r.text
-                            st.error(f"Failed to send test: {err_detail}")
-                    except Exception as e:
-                        st.error(f"Error connecting to backend: {e}")
+                    r = requests.post(f"{API_URL}/send-test", json=payload)
+                    if r.status_code == 200:
+                        st.success("Test email sent!")
+                    else:
+                        st.error(f"Failed to send test: {r.text}")
 
             cols = st.columns([1, 1, 1])
-            if cols[0].button("💾 Save Changes", key=f"save_{t['id']}"):
+            if cols[0].button("💾 Save Changes", key=f"save_{t['id']}" ):
                 update = {
                     "name": new_name,
                     "subject": new_subject,
@@ -174,17 +153,15 @@ def show():
                 result = requests.patch(f"{API_URL}/templates/{t['id']}", json=update)
                 if result.status_code == 200:
                     st.success("Template updated.")
-                    st.session_state[t_key] = True
                     st.cache_data.clear()
                     st.rerun()
                 else:
                     st.error("Update failed.")
 
-            if cols[1].button("❌ Delete", key=f"del_{t['id']}"):
+            if cols[1].button("❌ Delete", key=f"del_{t['id']}" ):
                 result = requests.delete(f"{API_URL}/templates/{t['id']}")
                 if result.status_code == 200:
                     st.warning("Template deleted.")
-                    st.session_state[t_key] = False
                     st.cache_data.clear()
                     st.rerun()
                 else:

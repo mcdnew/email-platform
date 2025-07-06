@@ -1,3 +1,5 @@
+# frontend/views/sequences.py
+
 import streamlit as st
 import requests
 
@@ -42,17 +44,14 @@ def show():
     tmpl_id_to_name = {t['id']: t['name'] for t in templates}
 
     for seq in sequences:
-        seq_key = f"expander_seq_{seq['id']}"
-        expanded = st.session_state.get(seq_key, False)
-
-        with st.expander(seq["name"] + f" (ID: {seq['id']})", expanded=expanded):
+        with st.expander(seq["name"] + f" (ID: {seq['id']})"):
+            # Inline edit sequence name
             new_name = st.text_input("Edit Sequence Name", seq["name"], key=f"seqname_{seq['id']}")
             cols = st.columns([1, 1])
             if cols[0].button("Save Name", key=f"savename_{seq['id']}"):
                 r = requests.patch(f"{API_URL}/sequences/{seq['id']}", json={"name": new_name})
                 if r.status_code == 200:
                     st.success("Sequence name updated")
-                    st.session_state[seq_key] = True
                     st.cache_data.clear()
                     st.rerun()
                 else:
@@ -61,13 +60,13 @@ def show():
                 r = requests.delete(f"{API_URL}/sequences/{seq['id']}")
                 if r.status_code == 200:
                     st.success("Sequence deleted")
-                    st.session_state[seq_key] = False
                     st.cache_data.clear()
                     st.rerun()
                 else:
                     err = r.json().get("detail", r.text) if r.content else r.text
                     st.error(f"Failed to delete sequence: {err}")
 
+            # Steps list
             step_resp = requests.get(f"{API_URL}/sequences/{seq['id']}/steps")
             if step_resp.status_code != 200:
                 st.warning("No steps found.")
@@ -100,7 +99,6 @@ def show():
                         })
                         if r.status_code == 200:
                             st.success("Step updated")
-                            st.session_state[seq_key] = True
                             st.cache_data.clear()
                             st.rerun()
                         else:
@@ -110,7 +108,6 @@ def show():
                     r = requests.delete(f"{API_URL}/sequences/steps/{step['id']}")
                     if r.status_code == 200:
                         st.success("Step deleted")
-                        st.session_state[seq_key] = True
                         st.cache_data.clear()
                         st.rerun()
                     else:
@@ -133,9 +130,9 @@ def show():
                         })
                         if r.status_code == 200:
                             st.success("Step added")
-                            st.session_state[seq_key] = True
                             st.cache_data.clear()
                             st.rerun()
                         else:
                             err = r.json().get("detail", r.text) if r.content else r.text
                             st.error(f"Failed to add step: {err}")
+
