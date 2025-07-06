@@ -12,6 +12,8 @@ class TestEmailRequest(BaseModel):
 class AssignSequenceRequest(BaseModel):
     prospect_ids: List[int]
     sequence_id: int
+    ventilate_days: Optional[int] = 1
+    start_date: Optional[str] = None    # NEW: for user-chosen start date
 
 # --- New: for responses with names ---
 

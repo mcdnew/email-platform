@@ -11,7 +11,7 @@ efficient for large datasets.
 from __future__ import annotations
 
 import random
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, date, time
 from typing import Sequence as _SeqType, List
 
 from sqlmodel import Session, select, delete
@@ -234,49 +234,46 @@ def _already_scheduled_on(session: Session, date_: datetime.date) -> int:
 # Public scheduling API
 # --------------------------------------------------------------------------- #
 
+def bulk_assign_sequence_to_prospects(session, prospect_ids, sequence_id, ventilate_days=1, start_date=None):
+    # start_date: a date object (not datetime), fallback to today
+    if start_date is None:
+        start_date = date.today()
+    # Create send datetimes starting from start_date
+    step_1_dates = []
+    for i in range(len(prospect_ids)):
+        offset = random.randint(0, ventilate_days - 1)
+        # Combine with time.min to get a datetime object at 00:00
+        send_date = datetime.combine(start_date, time.min) + timedelta(days=offset)
+        step_1_dates.append(send_date)
 
-def bulk_assign_sequence_to_prospects(
-    session: Session, prospect_ids: List[int], sequence_id: int
-):
-    # — ensure each prospect record carries the new sequence_id —
-    for pid in prospect_ids:
+    for i, pid in enumerate(prospect_ids):
         prospect = session.get(Prospect, pid)
-        if prospect:
-            prospect.sequence_id = sequence_id
-            session.add(prospect)
-    session.commit()
-
-    steps = get_sequence_steps(session, sequence_id)
-    if not steps:
-        return
-
-    today = datetime.utcnow().date()
-    assignments_by_date: dict[datetime.date, list[tuple[int, SequenceStep]]] = {}
-
-    for pid in prospect_ids:
-        for step in steps:
-            send_date = _get_next_working_day(today + timedelta(days=step.delay_days))
-            assignments_by_date.setdefault(send_date, []).append((pid, step))
-
-    for send_date, assignments in assignments_by_date.items():
-        already = _already_scheduled_on(session, send_date)
-        slots_left = settings.MAX_EMAILS_PER_DAY - already
-        if slots_left <= 0:
+        if not prospect:
             continue
-
-        to_schedule = assignments[:slots_left]
-        times = _random_times_for_window(send_date, len(to_schedule))
-
-        for (pid, step), send_time in zip(to_schedule, times):
-            scheduled = ScheduledEmail(
+        prospect.sequence_id = sequence_id
+        session.add(prospect)
+        # Remove any existing scheduled emails for this prospect
+        scheduled_emails = session.exec(
+            select(ScheduledEmail).where(ScheduledEmail.prospect_id == pid)
+        ).all()
+        for se in scheduled_emails:
+            session.delete(se)
+        # Schedule steps for this prospect
+        steps = session.exec(
+            select(SequenceStep).where(SequenceStep.sequence_id == sequence_id)
+        ).all()
+        send_at = step_1_dates[i]
+        for step in sorted(steps, key=lambda s: s.delay_days):
+            scheduled_email = ScheduledEmail(
                 prospect_id=pid,
+                sequence_id=sequence_id,
                 template_id=step.template_id,
-                send_at=send_time,
-                status="pending",
+                send_at=send_at + timedelta(days=step.delay_days),
+                status="pending"
             )
-            session.add(scheduled)
-
+            session.add(scheduled_email)
     session.commit()
+
 
 
 def schedule_sequence_for_prospect(session: Session, prospect_id: int, sequence_id: int):

@@ -1,5 +1,3 @@
-# 📄 File: app/main.py (modernized, names in API)
-
 # 📄 File: app/main.py
 
 import os
@@ -29,7 +27,6 @@ CET = pytz.timezone("Europe/Paris")
 
 SEND_START = time(0, 0)
 SEND_END = time(23, 59)
-
 
 # --- Error Logging ---
 ERROR_LOG_PATH = "error_log.txt"
@@ -63,16 +60,11 @@ def clear_error_log():
     open(ERROR_LOG_PATH, "w").close()
     return {"message": "Error log cleared"}
 
-# --- Helpers ---
 def is_working_day(dt: datetime) -> bool:
     return dt.weekday() < 5
 
-#def is_within_window(dt: datetime) -> bool:
-#    return SEND_START <= dt.time() <= SEND_END
-
 def is_within_window(dt: datetime) -> bool:
-    return True  # <-- Always true for testing
-
+    return True  # For testing
 
 def get_now_cet():
     return datetime.now(CET)
@@ -120,7 +112,6 @@ def run_scheduler():
                 "company": prospect.company or "",
                 "title": prospect.title or ""
             }
-            # No sleep or delay!
             success = send_email(
                 to_email=prospect.email,
                 subject=template.subject,
@@ -197,34 +188,32 @@ def force_run_scheduler():
         print("Done.")
         return {"message": f"FORCE scheduler processed {count} emails."}
 
-# --- API Routes ---
-
+# --- Prospects API (with support for assigned param) ---
 @app.get("/prospects")
-def get_prospects(session: Session = Depends(get_session)):
-    prospects = crud.get_prospects(session)
-    # Build mapping: sequence id → name
+def get_prospects(assigned: Optional[bool] = None, session: Session = Depends(get_session)):
+    if assigned is None:
+        prospects = crud.get_prospects(session)
+    elif assigned:
+        prospects = session.exec(select(Prospect).where(Prospect.sequence_id.is_not(None))).all()
+    else:
+        prospects = session.exec(select(Prospect).where(Prospect.sequence_id.is_(None))).all()
+    # [rest of mapping/progress logic as in your working code...]
     sequences = {s.id: s.name for s in session.exec(select(Sequence)).all()}
-    # Build mapping: prospect id → scheduled emails for them
     scheds = session.exec(select(ScheduledEmail)).all()
-    # Build mapping: sequence id → total steps
     steps_by_sequence = {}
     for s in session.exec(select(Sequence)).all():
         steps = session.exec(select(SequenceStep).where(SequenceStep.sequence_id == s.id)).all()
         steps_by_sequence[s.id] = len(steps)
-
-    # Build mapping: prospect id → list of their scheduled emails (sorted by send_at)
     scheduled_by_prospect = {}
     for se in scheds:
         scheduled_by_prospect.setdefault(se.prospect_id, []).append(se)
     for v in scheduled_by_prospect.values():
         v.sort(key=lambda e: e.send_at or datetime.min)
-
     results = []
     for p in prospects:
         d = p.dict() if hasattr(p, "dict") else dict(p)
         seq_id = getattr(p, "sequence_id", None)
         d["sequence_name"] = sequences.get(seq_id) if seq_id else None
-        # Sequence Progress logic
         total_steps = steps_by_sequence.get(seq_id, 0) if seq_id else 0
         scheduled = scheduled_by_prospect.get(p.id, [])
         cur_step = sum(1 for e in scheduled if e.status in ("sent", "failed"))
@@ -254,15 +243,22 @@ def delete_prospect(prospect_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Prospect not found")
     return {"message": "Deleted"}
 
+
 @app.post("/assign-sequence")
 def assign_sequence(data: AssignSequenceRequest, session: Session = Depends(get_session)):
-    # Validate prospect existence
+    ventilate_days = data.ventilate_days or 1
+    # Parse start_date from string or fallback to today
+    try:
+        start_date = datetime.datetime.strptime(data.start_date, "%Y-%m-%d").date() if data.start_date else datetime.date.today()
+    except Exception:
+        start_date = datetime.date.today()
+    # Validate prospect existence as before...
     for pid in data.prospect_ids:
         if not session.get(Prospect, pid):
             raise HTTPException(status_code=404, detail=f"Prospect {pid} not found")
-    # Call new global bulk assignment function!
-    crud.bulk_assign_sequence_to_prospects(session, data.prospect_ids, data.sequence_id)
-    return {"message": f"Assigned sequence {data.sequence_id} to {len(data.prospect_ids)} prospects"}
+    # Pass start_date to the bulk assign function!
+    crud.bulk_assign_sequence_to_prospects(session, data.prospect_ids, data.sequence_id, ventilate_days, start_date)
+    return {"message": f"Assigned sequence {data.sequence_id} to {len(data.prospect_ids)} prospects over {ventilate_days} days starting {start_date}"}
 
 # --- Template API ---
 @app.get("/templates")
@@ -355,7 +351,6 @@ def delete_sequence_step(step_id: int, session: Session = Depends(get_session)):
     return {"message": "Deleted"}
 
 # --- Sent Email, Analytics, Unsubscribe, Scheduler ---
-
 @app.get("/sent-emails")
 def get_sent_emails(session: Session = Depends(get_session)):
     sent = session.exec(select(SentEmail).order_by(SentEmail.sent_at.desc())).all()
@@ -406,65 +401,6 @@ def send_test_email(payload: TestEmailRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ... All other endpoints remain unchanged as in your prior file ...
-
-
-@app.post("/run-scheduler")
-def run_scheduler_api():
-    result = run_scheduler()
-    return JSONResponse(content={"message": result})
-    
-    
-# ignore restrictions -for test purposes only
-
-@app.post("/force-scheduler")
-def force_run_scheduler():
-    print("Running scheduler in FORCE mode (ignoring limits)")
-    with next(get_session()) as session:
-        now = get_now_cet()
-        # IGNORE all restrictions
-        pending_emails = session.exec(
-            select(ScheduledEmail).where(
-                ScheduledEmail.sent_at.is_(None),
-                ScheduledEmail.status == "pending"
-            )
-        ).all()
-        count = 0
-        for email in pending_emails:
-            prospect = session.get(Prospect, email.prospect_id)
-            template = session.get(EmailTemplate, email.template_id)
-            if not prospect or not template:
-                continue
-            # Remove delay for test:
-            # time_module.sleep(get_random_delay())
-            success = send_email(
-                to_email=prospect.email,
-                subject=template.subject,
-                body=template.body,
-                bcc_email=prospect.email if '@example.com' not in prospect.email else None
-            )
-            email.sent_at = datetime.utcnow()
-            email.status = "sent" if success else "failed"
-            sent_record = SentEmail(
-                to=prospect.email,
-                subject=template.subject,
-                body=template.body,
-                sent_at=email.sent_at,
-                status=email.status,
-                prospect_id=prospect.id
-            )
-            session.add(email)
-            session.add(sent_record)
-            count += 1
-        session.commit()
-        print("Done.")
-        return {"message": f"FORCE scheduler processed {count} emails."}
-        
-        
-from fastapi import HTTPException
-from sqlmodel import select
-# … your other imports …
-
 @app.get("/prospects/{prospect_id}/timeline")
 def get_prospect_timeline(prospect_id: int, session: Session = Depends(get_session)):
     prospect = session.get(Prospect, prospect_id)
@@ -472,27 +408,22 @@ def get_prospect_timeline(prospect_id: int, session: Session = Depends(get_sessi
         raise HTTPException(status_code=404, detail="Prospect not found.")
 
     sequence_id = prospect.sequence_id
-
-    # pull in all scheduled emails for this prospect
     scheduled = session.exec(
         select(ScheduledEmail)
         .where(ScheduledEmail.prospect_id == prospect_id)
     ).all()
 
-    # build a quick lookup: template_id → list[ScheduledEmail]
-    sched_by_tmpl: dict[int, list[ScheduledEmail]] = {}
+    sched_by_tmpl = {}
     for s in scheduled:
         sched_by_tmpl.setdefault(s.template_id, []).append(s)
 
-    # load templates for names/subjects
     template_map = {
         t.id: t for t in session.exec(select(EmailTemplate)).all()
     }
 
-    timeline: list[dict] = []
+    timeline = []
 
     if sequence_id:
-        # for each step in the sequence, pick its scheduled entry
         steps = session.exec(
             select(SequenceStep)
             .where(SequenceStep.sequence_id == sequence_id)
@@ -501,7 +432,6 @@ def get_prospect_timeline(prospect_id: int, session: Session = Depends(get_sessi
 
         for idx, step in enumerate(steps, start=1):
             tmpl = template_map.get(step.template_id)
-            # get the one ScheduledEmail for this step (if any)
             candidates = sched_by_tmpl.get(step.template_id, [])
             sched = min(candidates, key=lambda x: x.send_at, default=None)
 
@@ -512,12 +442,9 @@ def get_prospect_timeline(prospect_id: int, session: Session = Depends(get_sessi
                 "scheduled_at": sched.send_at if sched else None,
                 "sent_at": sched.sent_at if sched else None,
                 "status": sched.status if sched else "-",
-                # if you have an opened_at column on ScheduledEmail, else this will be None
                 "opened_at": getattr(sched, "opened_at", None) if sched else None,
             })
-
     else:
-        # fallback: just list every scheduled email for this prospect
         for sched in sorted(scheduled, key=lambda x: x.send_at or datetime.min):
             tmpl = template_map.get(sched.template_id)
             timeline.append({
@@ -531,9 +458,6 @@ def get_prospect_timeline(prospect_id: int, session: Session = Depends(get_sessi
             })
 
     return timeline
-        
-
-# - here ends the test code section    
 
 @app.get("/unsubscribe")
 def unsubscribe(token: str, session: Session = Depends(get_session)):
@@ -554,20 +478,13 @@ def unsubscribe(token: str, session: Session = Depends(get_session)):
     except Exception:
         return HTMLResponse("<h3>Invalid or expired unsubscribe link.</h3>", status_code=400)
 
-
 @app.post("/reset-all", status_code=status.HTTP_200_OK)
 def reset_all(session: Session = Depends(get_session)):
-    """
-    Danger: Deletes all data in the main tables!
-    Only use for development/testing.
-    """
     if not os.getenv("DEV_MODE", "false").lower() == "true":
         raise HTTPException(status_code=403, detail="Not allowed in production")
-    
-    # Truncate all tables in correct order, SQLModel/SQLAlchemy style
     for model in [SentEmail, ScheduledEmail, SequenceStep, Sequence, Prospect, EmailTemplate]:
         session.query(model).delete()
         session.commit()
-    print("RESET ALL ENDPOINT HIT")  # Optional debug print
+    print("RESET ALL ENDPOINT HIT")
     return {"message": "All data deleted!"}
 
