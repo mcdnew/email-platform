@@ -27,17 +27,19 @@ class Sequence(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
-
+    bcc_email: Optional[str] = None  # <-- Per-sequence BCC email (optional)
+    
 class SequenceStep(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     sequence_id: int = Field(foreign_key="sequence.id")
     template_id: int = Field(foreign_key="emailtemplate.id")
     delay_days: int
-
+    
 class ScheduledEmail(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     prospect_id: int = Field(foreign_key="prospect.id")
     template_id: int = Field(foreign_key="emailtemplate.id")
+    sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")  # ✅ Add this line
     send_at: datetime
     sent_at: Optional[datetime] = None
     status: str = "pending"

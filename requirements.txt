@@ -8,4 +8,4 @@ pandas
 python-dotenv
 aiosmtplib
 Faker
-
+html2text

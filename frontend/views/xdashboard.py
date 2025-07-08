@@ -1,13 +1,10 @@
-# 📄 frontend/views/dashboard.py
+# frontend/views/dashboard.py
 
 import streamlit as st
 import pandas as pd
 import requests
-import os
-from datetime import datetime, timedelta
 
 API_URL = "http://localhost:8000"
-CRON_LOG = "/home/mcd/email-platform/logs/cron_invocations.log"
 
 @st.cache_data(ttl=60)
 def fetch_sequences():
@@ -24,34 +21,8 @@ def fetch_sent_emails():
     resp = requests.get(f"{API_URL}/sent-emails")
     return resp.json() if resp.ok else []
 
-def show_cron_status():
-    st.subheader("⏱ Cron Job Monitor")
-    if not os.path.exists(CRON_LOG):
-        st.error("Cron log file not found.")
-        return
-
-    with open(CRON_LOG) as f:
-        lines = [line for line in f if "Cron job fired" in line]
-
-    if not lines:
-        st.warning("No cron executions recorded yet.")
-        return
-
-    last_ts = lines[-1].split("]")[0].strip("[")
-    try:
-        dt_last = datetime.strptime(last_ts, "%Y-%m-%d %H:%M:%S")
-        dt_next = dt_last + timedelta(minutes=5)
-        st.success(f"Last run: {dt_last.strftime('%Y-%m-%d %H:%M:%S')}")
-        st.info(f"Next est. run: {dt_next.strftime('%Y-%m-%d %H:%M:%S')}")
-        st.caption(f"📈 Total cron executions logged: {len(lines)}")
-    except Exception as e:
-        st.error(f"Error parsing cron log: {e}")
-
 def show():
     st.title("📊 Email Platform Dashboard")
-
-    # Show cron monitor
-    show_cron_status()
 
     # Fetch analytics
     resp = requests.get(f"{API_URL}/analytics/summary")
@@ -60,6 +31,7 @@ def show():
         return
     data = resp.json()
 
+    # Layout for metrics
     col1, col2, col3 = st.columns(3)
     col1.metric("📨 Emails Sent", data["total_sent"])
     col2.metric("📬 Open Rate", f"{data['open_rate']}%")
@@ -67,8 +39,9 @@ def show():
     st.metric("📅 Sent Today", data["sent_today"])
 
     st.divider()
-    st.subheader("📈 Volume by Sequence & Template")
 
+    # --- Name-based analytics ---
+    st.subheader("📈 Volume by Sequence & Template")
     sent_emails = fetch_sent_emails()
     seqs = fetch_sequences()
     tmpls = fetch_templates()
@@ -85,14 +58,25 @@ def show():
         st.markdown("#### Emails Sent by Sequence")
         if 'sequence_name' in df:
             seq_grp = df.groupby('sequence_name').size().reset_index(name='count')
-            st.bar_chart(seq_grp.set_index('sequence_name'))
+            if not seq_grp.empty:
+                st.bar_chart(seq_grp.set_index('sequence_name'))
+            else:
+                st.info("No emails sent for any sequence yet.")
+        else:
+            st.info("No sequence info in sent emails.")
 
         st.markdown("#### Emails Sent by Template")
         if 'template_name' in df:
             tmpl_grp = df.groupby('template_name').size().reset_index(name='count')
-            st.bar_chart(tmpl_grp.set_index('template_name'))
+            if not tmpl_grp.empty:
+                st.bar_chart(tmpl_grp.set_index('template_name'))
+            else:
+                st.info("No emails sent for any template yet.")
+        else:
+            st.info("No template info in sent emails.")
 
     st.divider()
+
     st.subheader("🕒 Recent Deliveries")
     if not data["recent"]:
         st.info("No recent emails.")
@@ -101,6 +85,7 @@ def show():
         df["sent_at"] = pd.to_datetime(df["sent_at"]).dt.strftime("%Y-%m-%d %H:%M")
         st.dataframe(df[["to", "subject", "status", "sent_at"]], use_container_width=True)
 
+    # Run scheduler manually
     st.divider()
     st.subheader("📬 Manual Scheduler Trigger")
     if st.button("📬 Run Scheduler Now"):
@@ -109,7 +94,7 @@ def show():
             st.success(run_resp.json().get("message"))
         else:
             st.error("Failed to run scheduler.")
-
+    # --- Force scheduler button for test mode ---
     if st.button("🚨 Force Send All Pending Emails (ignores limits!)"):
         run_resp = requests.post(f"{API_URL}/force-scheduler")
         if run_resp.ok:

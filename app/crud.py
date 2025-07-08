@@ -1,21 +1,12 @@
-"""CRUD helpers for email-platform.
-
-Implements bulk assignment with globally distributed scheduling as well as
-standard CRUD operations for Prospects, Templates, Sequences and Steps.
-
-This version fixes ScalarResult `.count()`/`.scalar_one()` errors by performing
-pure SQL `COUNT(*)` queries via SQLAlchemy's `func.count()` which is safe and
-efficient for large datasets.
-"""
+"""CRUD helpers for email-platform – SQLAlchemy 2.x compatible."""
 
 from __future__ import annotations
-
 import random
 from datetime import datetime, timedelta, date, time
-from typing import Sequence as _SeqType, List
+from typing import List
 
-from sqlmodel import Session, select, delete
-from sqlalchemy import func
+from sqlmodel import Session, select
+from sqlalchemy import func, delete
 
 from app.models import (
     Prospect,
@@ -28,255 +19,199 @@ from app.models import (
 )
 from app.config import settings
 
-# --------------------------------------------------------------------------- #
-# Generic helpers
-# --------------------------------------------------------------------------- #
+# ─────────────────────────────── helpers ───────────────────────────────
+def _next_working(d: date) -> date:
+    """Return next weekday ≥ d (skipping Sat/Sun)."""
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d
 
-def _rows_to_dict(rows: _SeqType) -> list[dict]:
-    out: list[dict] = []
-    for r in rows:
-        if hasattr(r, "dict"):
-            out.append(r.dict())
-        elif hasattr(r, "_mapping"):  # SQLAlchemy Row
-            out.append(dict(r._mapping))
-        else:
-            try:
-                out.append(vars(r))
-            except Exception:
-                continue
-    return out
-
-def _get_next_working_day(dt: date):
-    while dt.weekday() >= 5:
-        dt += timedelta(days=1)
-    return dt
-
-def _random_times_for_window(
-    base_date: date,
-    count: int,
-    start_hour: int = 9,
-    end_hour: int = 21,
-) -> list[datetime]:
-    window_minutes = (end_hour - start_hour) * 60
-    if count > window_minutes:
-        raise ValueError("More emails than available slots in the window")
-    slots = random.sample(range(window_minutes), count)
+def _random_times(base: date, n: int, start_h: int = 9, end_h: int = 21) -> list[datetime]:
+    """Return n unique datetimes between start_h and end_h on date base."""
+    minutes = (end_h - start_h) * 60
+    if n > minutes:
+        raise ValueError("window too small")
+    picks = random.sample(range(minutes), n)
     return [
-        datetime.combine(base_date, time(start_hour, 0)) + timedelta(minutes=m)
-        for m in sorted(slots)
+        datetime.combine(base, time(start_h)) + timedelta(minutes=m)
+        for m in sorted(picks)
     ]
 
-# --------------------------------------------------------------------------- #
-# Prospect CRUD
-# --------------------------------------------------------------------------- #
+def _already_scheduled(session: Session, d: date) -> int:
+    """Count how many ScheduledEmail have send_at on calendar-day d."""
+    start = datetime.combine(d, time.min)
+    end   = datetime.combine(d, time.max)
+    return session.exec(
+        select(func.count()).select_from(ScheduledEmail)
+        .where(
+            ScheduledEmail.send_at >= start,
+            ScheduledEmail.send_at <= end
+        )
+    ).scalar_one()  # COUNT(*) always returns exactly one row
 
-def create_prospect(session: Session, prospect: Prospect):
-    session.add(prospect)
+# ───────────────────────── Prospect CRUD ───────────────────────────────
+def create_prospect(session: Session, p: Prospect) -> Prospect:
+    session.add(p)
     session.commit()
-    session.refresh(prospect)
-    return prospect
+    session.refresh(p)
+    return p
 
-def get_prospects(session: Session):
+def get_prospects(session: Session) -> list[Prospect]:
     return session.exec(select(Prospect)).all()
 
-def update_prospect(session: Session, prospect: Prospect):
-    session.add(prospect)
+def update_prospect(session: Session, p: Prospect) -> Prospect:
+    session.add(p)
     session.commit()
-    session.refresh(prospect)
-    return prospect
+    session.refresh(p)
+    return p
 
-def delete_prospect(session: Session, prospect_id: int):
-    prospect = session.get(Prospect, prospect_id)
+def delete_prospect(session: Session, pid: int) -> bool:
+    """Delete prospect and any related ScheduledEmail and SentEmail rows."""
+    prospect = session.get(Prospect, pid)
     if not prospect:
         return False
-    # Cascade-delete all scheduled & sent emails for this prospect
-    for se in session.exec(select(ScheduledEmail).where(ScheduledEmail.prospect_id == prospect_id)).all():
-        session.delete(se)
-    for se in session.exec(select(SentEmail).where(SentEmail.prospect_id == prospect_id)).all():
-        session.delete(se)
+    # bulk-delete their schedules and sent records
+    session.exec(delete(ScheduledEmail).where(ScheduledEmail.prospect_id == pid))
+    session.exec(delete(SentEmail).where(SentEmail.prospect_id == pid))
     session.delete(prospect)
     session.commit()
     return True
 
-# --------------------------------------------------------------------------- #
-# Template CRUD
-# --------------------------------------------------------------------------- #
-
-def create_template(session: Session, template: EmailTemplate):
-    session.add(template)
+# ───────────────────────── Template CRUD ───────────────────────────────
+def create_template(session: Session, t: EmailTemplate) -> EmailTemplate:
+    session.add(t)
     session.commit()
-    session.refresh(template)
-    return template
+    session.refresh(t)
+    return t
 
-def get_templates(session: Session):
+def get_templates(session: Session) -> list[EmailTemplate]:
     return session.exec(select(EmailTemplate)).all()
 
-def update_template(session: Session, template_id: int, data: EmailTemplateUpdate):
-    tpl = session.get(EmailTemplate, template_id)
+def update_template(session: Session, tid: int, up: EmailTemplateUpdate) -> EmailTemplate | None:
+    tpl = session.get(EmailTemplate, tid)
     if not tpl:
         return None
-    for k, v in data.dict(exclude_unset=True).items():
+    for k, v in up.dict(exclude_unset=True).items():
         setattr(tpl, k, v)
     session.add(tpl)
     session.commit()
     session.refresh(tpl)
     return tpl
 
-def delete_template(session: Session, template_id: int):
-    tpl = session.get(EmailTemplate, template_id)
-    if not tpl:
-        return False
+def delete_template(session: Session, tid: int) -> bool | None:
+    """Return None if in use, False if not found, True if deleted."""
     in_use = session.exec(
-        select(SequenceStep).where(SequenceStep.template_id == template_id)
+        select(SequenceStep).where(SequenceStep.template_id == tid)
     ).first()
     if in_use:
         return None
+    tpl = session.get(EmailTemplate, tid)
+    if not tpl:
+        return False
     session.delete(tpl)
     session.commit()
     return True
 
-# --------------------------------------------------------------------------- #
-# Sequence + Steps CRUD
-# --------------------------------------------------------------------------- #
-
-def create_sequence(session: Session, sequence: Sequence):
-    session.add(sequence)
+# ─────────────────────── Sequence & Steps CRUD ────────────────────────
+def create_sequence(session: Session, seq: Sequence) -> Sequence:
+    session.add(seq)
     session.commit()
-    session.refresh(sequence)
-    return sequence
+    session.refresh(seq)
+    return seq
 
-def get_sequences(session: Session):
+def get_sequences(session: Session) -> list[Sequence]:
     return session.exec(select(Sequence)).all()
 
-def create_sequence_step(session: Session, step: SequenceStep):
+def create_sequence_step(session: Session, step: SequenceStep) -> SequenceStep:
     session.add(step)
     session.commit()
     session.refresh(step)
     return step
 
-def get_sequence_steps(session: Session, sequence_id: int):
+def get_sequence_steps(session: Session, seq_id: int) -> list[SequenceStep]:
     return session.exec(
-        select(SequenceStep).where(SequenceStep.sequence_id == sequence_id)
+        select(SequenceStep).where(SequenceStep.sequence_id == seq_id)
     ).all()
 
-def update_sequence_step(session: Session, step_id: int, data):
-    step = session.get(SequenceStep, step_id)
+def update_sequence_step(session: Session, sid: int, up: SequenceStep) -> SequenceStep | None:
+    step = session.get(SequenceStep, sid)
     if not step:
         return None
-    for k, v in data.dict(exclude_unset=True).items():
+    for k, v in up.dict(exclude_unset=True).items():
         setattr(step, k, v)
     session.add(step)
     session.commit()
     session.refresh(step)
     return step
 
-def delete_sequence_step(session: Session, step_id: int):
-    step = session.get(SequenceStep, step_id)
+def delete_sequence_step(session: Session, sid: int) -> bool:
+    step = session.get(SequenceStep, sid)
     if not step:
         return False
     session.delete(step)
     session.commit()
     return True
 
-# --------------------------------------------------------------------------- #
-# Scheduling helpers
-# --------------------------------------------------------------------------- #
-
-def _already_scheduled_on(session: Session, date_: date) -> int:
-    start = datetime.combine(date_, time(0, 0))
-    end = start + timedelta(days=1)
-    return (
-        session.exec(
-            select(func.count())
-            .select_from(ScheduledEmail)
-            .where(ScheduledEmail.send_at >= start, ScheduledEmail.send_at < end)
-        )
-        .scalar_one()
-    )
-
-# --------------------------------------------------------------------------- #
-# Public scheduling API
-# --------------------------------------------------------------------------- #
-
-def bulk_assign_sequence_to_prospects(session, prospect_ids, sequence_id, ventilate_days=1, start_date=None):
+# ─────────────────────── Bulk scheduling ──────────────────────────────# ─────────────────────── Bulk scheduling ──────────────────────────────
+def bulk_assign_sequence_to_prospects(
+    session: Session,
+    prospect_ids: List[int],
+    sequence_id: int,
+    ventilate_days: int = 0,
+    start_date: date | None = None,
+):
+    """
+    Assign *sequence_id* to each prospect in *prospect_ids* and create
+    corresponding ScheduledEmail rows, spreading first step over ventilate_days.
+    """
     if start_date is None:
         start_date = date.today()
-    # Create send datetimes starting from start_date
-    step_1_dates = []
-    for i in range(len(prospect_ids)):
-        offset = random.randint(0, ventilate_days - 1)
-        send_date = datetime.combine(start_date, time.min) + timedelta(days=offset)
-        step_1_dates.append(send_date)
 
-    for i, pid in enumerate(prospect_ids):
+    # fetch all steps once
+    steps = session.exec(
+        select(SequenceStep).where(SequenceStep.sequence_id == sequence_id)
+    ).all()
+    if not steps:
+        return
+
+    # random offsets for day-0 send
+    offsets = (
+        [0] * len(prospect_ids)
+        if ventilate_days == 0
+        else [random.randint(0, ventilate_days - 1) for _ in prospect_ids]
+    )
+    first_dates = [start_date + timedelta(days=o) for o in offsets]
+
+    for pid, first_d in zip(prospect_ids, first_dates):
         prospect = session.get(Prospect, pid)
         if not prospect:
             continue
+
+        # attach sequence
         prospect.sequence_id = sequence_id
         session.add(prospect)
-        # Remove any existing scheduled emails for this prospect
-        scheduled_emails = session.exec(
-            select(ScheduledEmail).where(ScheduledEmail.prospect_id == pid)
-        ).all()
-        for se in scheduled_emails:
-            session.delete(se)
-        # Schedule steps for this prospect
-        steps = session.exec(
-            select(SequenceStep).where(SequenceStep.sequence_id == sequence_id)
-        ).all()
-        send_at = step_1_dates[i]
-        for step in sorted(steps, key=lambda s: s.delay_days):
-            scheduled_email = ScheduledEmail(
+
+        # purge any old schedule
+        session.exec(delete(ScheduledEmail).where(ScheduledEmail.prospect_id == pid))
+
+        # schedule each step
+        for step in steps:
+            send_day = _next_working(first_d + timedelta(days=step.delay_days))
+            send_dt = _random_times(send_day, 1)[0]
+
+            # prevent scheduling in the past
+            now = datetime.now()
+            if send_day == now.date() and send_dt < now:
+                send_dt = now + timedelta(minutes=30)
+
+            sched = ScheduledEmail(
                 prospect_id=pid,
                 sequence_id=sequence_id,
                 template_id=step.template_id,
-                send_at=send_at + timedelta(days=step.delay_days),
-                status="pending"
+                send_at=send_dt,
+                status="pending",
             )
-            session.add(scheduled_email)
-    session.commit()
+            session.add(sched)
 
-def schedule_sequence_for_prospect(session: Session, prospect_id: int, sequence_id: int):
-    steps = get_sequence_steps(session, sequence_id)
-    if not steps:
-        return
-    today = datetime.utcnow().date()
-    for step in steps:
-        send_date = _get_next_working_day(today + timedelta(days=step.delay_days))
-        already = _already_scheduled_on(session, send_date)
-        if already >= settings.MAX_EMAILS_PER_DAY:
-            continue
-        send_time = _random_times_for_window(send_date, 1)[0]
-        scheduled = ScheduledEmail(
-            prospect_id=prospect_id,
-            template_id=step.template_id,
-            send_at=send_time,
-            status="pending",
-        )
-        session.add(scheduled)
     session.commit()
-
-def get_prospect_sequence_progress(session, prospect_id: int, sequence_id: int):
-    if not sequence_id:
-        return (0, 0)
-    steps = list(
-        session.exec(select(SequenceStep).where(SequenceStep.sequence_id == sequence_id))
-    )
-    total = len(steps)
-    if total == 0:
-        return (0, 0)
-    template_ids = [s.template_id for s in steps]
-    sent_count = (
-        session.exec(
-            select(func.count())
-            .select_from(ScheduledEmail)
-            .where(
-                ScheduledEmail.prospect_id == prospect_id,
-                ScheduledEmail.template_id.in_(template_ids),
-                ScheduledEmail.status == "sent",
-            )
-        )
-        .scalar_one()
-    )
-    return (sent_count, total)
 
