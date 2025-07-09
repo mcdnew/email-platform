@@ -6,12 +6,12 @@ API_URL = "http://localhost:8000"
 
 # Status color/emoji tags for sent emails
 STATUS_COLORS = {
-    "scheduled": "🟦 Scheduled",
-    "sent": "🟩 Sent",
-    "failed": "🟥 Failed",
-    "opened": "🟦 Opened",
+    "scheduled":   "🟦 Scheduled",
+    "sent":        "🟩 Sent",
+    "failed":      "🟥 Failed",
+    "opened":      "🟦 Opened",
     "in_sequence": "🟧 In Sequence",
-    "completed": "⬜️ Completed"
+    "completed":   "⬜️ Completed"
 }
 
 @st.cache_data(ttl=60)
@@ -36,40 +36,45 @@ def show():
     if not data:
         st.info("No emails have been sent yet.")
         return
+
     df = pd.DataFrame(data)
     df["sent_at"] = pd.to_datetime(df["sent_at"]).dt.strftime("%Y-%m-%d %H:%M:%S")
 
     # Map template and sequence names if IDs exist
     templates = fetch_templates()
-    template_map = {t['id']: t['name'] for t in templates}
+    template_map = {t["id"]: t["name"] for t in templates}
     sequences = fetch_sequences()
-    sequence_map = {s['id']: s['name'] for s in sequences}
+    sequence_map = {s["id"]: s["name"] for s in sequences}
 
-    if 'template_id' in df.columns:
+    if "template_id" in df.columns:
         df["template_name"] = df["template_id"].map(template_map).fillna("")
-    if 'sequence_id' in df.columns:
+    if "sequence_id" in df.columns:
         df["sequence_name"] = df["sequence_id"].map(sequence_map).fillna("")
 
     # Status with color/emoji
     def status_tag(row):
         status = str(row.get("status", "")).lower()
         return STATUS_COLORS.get(status, status.capitalize())
+
     df["status_tag"] = df.apply(status_tag, axis=1)
 
     columns_to_show = ["id", "to", "subject", "status_tag", "sent_at"]
-    if "sequence_name" in df:
+    if "sequence_name" in df.columns:
         columns_to_show.append("sequence_name")
-    if "template_name" in df:
+    if "template_name" in df.columns:
         columns_to_show.append("template_name")
 
     st.dataframe(df[columns_to_show], use_container_width=True)
 
-    # Add delete all button (for dev)
+    # Clear All Sent Emails (uses dev endpoint)
+    st.divider()
+    st.subheader("Danger: Clear All Sent Emails")
     if st.button("❌ Clear All Sent Emails"):
-        r = requests.delete(f"{API_URL}/sent-emails/clear")
-        if r.ok:
+        resp = requests.post(f"{API_URL}/dev/reset-table/sent_emails")
+        if resp.ok:
             st.success("All sent emails deleted!")
+            st.cache_data.clear()
             st.rerun()
         else:
-            st.error(f"Delete failed: {r.text}")
+            st.error(f"Delete failed: {resp.text}")
 

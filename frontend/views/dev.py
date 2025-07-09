@@ -132,7 +132,7 @@ def show():
             st.error(f"Failed: {resp.text}")
             
             
-    st.divider()
+'''    st.divider()
     st.subheader("Insert Example Test Prospect (with scheduled email)")
 
     if st.button("➕ Insert Test Prospect/Email"):
@@ -141,7 +141,9 @@ def show():
             st.success("Test prospect, template, and scheduled email inserted!")
             st.cache_data.clear()
             st.rerun()
-        else:
+        else
             st.error(f"Failed: {resp.text}")
+            
+'''
         
 

@@ -140,7 +140,7 @@ def insert_test_prospect(session: Session = Depends(get_session)):
     dev_only()
     prospect = Prospect(
         name="Test User",
-        email="claudiu.muntianu@fordaq.com",
+        email="user@testcorp.com",
         company="TestCorp"
     )
     session.add(prospect)
