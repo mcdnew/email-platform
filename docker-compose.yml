@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER:     email_user
+      POSTGRES_PASSWORD: strongpassword
+      POSTGRES_DB:       email_platform
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # point at the "db" service instead of localhost
+      DATABASE_URL: "postgresql://email_user:strongpassword@db:5432/email_platform"
+    volumes:
+      # so your cron and error logs persist on the host
+      - ./logs:/app/logs
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "8501:8501"
+    env_file:
+      - ./frontend/.env
+    environment:
+      API_URL: "http://backend:8000"
+
+volumes:
+  db_data:
+
+
+## usage: 
+# docker compose down
+# docker compose build
+# docker compose up -d
+

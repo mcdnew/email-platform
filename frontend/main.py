@@ -10,8 +10,8 @@ import sys
 load_dotenv()
 
 # 2) Simple password protection
-#PASSWORD = os.getenv("APP_PASSWORD", "changeme")
-PASSWORD = "agent007"
+PASSWORD = os.getenv("APP_PASSWORD", "changeme")
+#PASSWORD = "agent007"
 
 if "authed" not in st.session_state:
     st.session_state.authed = False

@@ -1,4 +1,4 @@
-# 📄 frontend/views/dashboard.py
+# frontend/views/dashboard.py
 
 import streamlit as st
 import pandas as pd
@@ -6,8 +6,7 @@ import requests
 import os
 from datetime import datetime, timedelta
 
-API_URL = "http://localhost:8000"
-CRON_LOG = "/home/mcd/email-platform/logs/cron_invocations.log"
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 @st.cache_data(ttl=60)
 def fetch_sequences():
@@ -24,19 +23,31 @@ def fetch_sent_emails():
     resp = requests.get(f"{API_URL}/sent-emails")
     return resp.json() if resp.ok else []
 
+@st.cache_data(ttl=60)
+def fetch_cron_log():
+    """Call backend `/cron-log` and return the last 10 'Cron job fired' lines."""
+    resp = requests.get(f"{API_URL}/cron-log")
+    if resp.status_code == 404:
+        raise FileNotFoundError("Cron log not found on server.")
+    resp.raise_for_status()
+    return resp.json().get("lines", [])
+
 def show_cron_status():
     st.subheader("⏱ Cron Job Monitor")
-    if not os.path.exists(CRON_LOG):
-        st.error("Cron log file not found.")
+    try:
+        lines = fetch_cron_log()
+    except FileNotFoundError:
+        st.error("Cron log file not found on server.")
         return
-
-    with open(CRON_LOG) as f:
-        lines = [line for line in f if "Cron job fired" in line]
+    except Exception as e:
+        st.error(f"Error fetching cron log: {e}")
+        return
 
     if not lines:
         st.warning("No cron executions recorded yet.")
         return
 
+    # parse last timestamp from the log lines
     last_ts = lines[-1].split("]")[0].strip("[")
     try:
         dt_last = datetime.strptime(last_ts, "%Y-%m-%d %H:%M:%S")
@@ -45,15 +56,15 @@ def show_cron_status():
         st.info(f"Next est. run: {dt_next.strftime('%Y-%m-%d %H:%M:%S')}")
         st.caption(f"📈 Total cron executions logged: {len(lines)}")
     except Exception as e:
-        st.error(f"Error parsing cron log: {e}")
+        st.error(f"Error parsing cron log timestamp: {e}")
 
 def show():
     st.title("📊 Email Platform Dashboard")
 
-    # Show cron monitor
+    # Cron monitor
     show_cron_status()
 
-    # Fetch analytics
+    # Analytics summary
     resp = requests.get(f"{API_URL}/analytics/summary")
     if resp.status_code != 200:
         st.error("Failed to load analytics")

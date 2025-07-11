@@ -1,20 +1,39 @@
-# Virtual environments
-venv/
+# ─── Environment files ─────────────────────────────────────────────────────────
+# ignore real secrets
 .env
+frontend/.env
 
-# Python cache and compiled files
+# but keep the examples!
+!.env.example
+!frontend/.env.example
+
+# ─── Python virtualenv ─────────────────────────────────────────────────────────
+venv/
+
+# ─── Python cache & bytecode ───────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 
-# Database files (sqlite, any .db)
+# ─── Local SQLite DB (if any) ──────────────────────────────────────────────────
 *.db
 *.sqlite
 
-# Mac system file
-.DS_Store
-
-# Log files
+# ─── Logs ──────────────────────────────────────────────────────────────────────
+# ignore all .log files and the logs/ folder
 *.log
+logs/
 
-# Test data
+# ─── Mac & Editor files ────────────────────────────────────────────────────────
+.DS_Store
+.vscode/
+.idea/
+
+# ─── Docker overrides & misc ───────────────────────────────────────────────────
+docker-compose.override.yml
+*.pid
+
+# ─── (Optional) Test data ─────────────────────────────────────────────────────
+# Uncomment if you want to commit your sample CSV:
+# !test_prospects.csv
 test_prospects.csv
+

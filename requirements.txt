@@ -9,3 +9,7 @@ python-dotenv
 aiosmtplib
 Faker
 html2text
+psycopg2-binary
+alembic>=1.10
+
+

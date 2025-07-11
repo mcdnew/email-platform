@@ -1,3 +1,4 @@
+import os
 import datetime as _dt
 import io
 import csv
@@ -6,7 +7,8 @@ import requests
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
-API_URL = "http://localhost:8000"
+# API_URL = "http://localhost:8000"
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 STATUS = {
     "scheduled":   "🕦 Scheduled",

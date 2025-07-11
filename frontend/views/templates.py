@@ -1,10 +1,12 @@
+import os
 import streamlit as st
 import streamlit.components.v1 as components
 import requests
 import re
 from jinja2 import Template
 
-API_URL = "http://localhost:8000"
+# API_URL = "http://localhost:8000"
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 FALLBACK_DATA = {
     "name": "there",

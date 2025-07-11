@@ -1,9 +1,11 @@
+import os
 import streamlit as st
 import pandas as pd
 import requests
 
-API_URL = "http://localhost:8000"
 
+# API_URL = "http://localhost:8000"
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 # Status color/emoji tags for sent emails
 STATUS_COLORS = {
     "scheduled":   "🟦 Scheduled",
