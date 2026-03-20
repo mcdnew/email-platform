@@ -59,13 +59,24 @@ class Settings:
 
     # ── API Auth ─────────────────────────────────────────────────────────────────
     # Secret key for X-API-Key header auth on all endpoints.
-    # Also used for signing unsubscribe tokens (itsdangerous).
     # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
     API_KEY: str = os.getenv("API_KEY", "")
+
+    # ── Unsubscribe Token Secret ──────────────────────────────────────────────────
+    # Dedicated secret for signing unsubscribe tokens (itsdangerous URLSafeSerializer).
+    # Keeping this separate from API_KEY means rotating API_KEY does not invalidate
+    # unsubscribe links already embedded in sent emails.
+    # Falls back to API_KEY if unset (backward compat).
+    # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+    UNSUBSCRIBE_SECRET: str = os.getenv("UNSUBSCRIBE_SECRET", "")
 
     # ── Scheduler / Send Window ──────────────────────────────────────────────────
     # Timezone for send window enforcement (pytz timezone string).
     TIMEZONE: str = os.getenv("TIMEZONE", "Europe/Paris")
+
+    # ── Retry Logic ──────────────────────────────────────────────────────────────
+    # Maximum number of times a failed email will be retried via POST /retry-failed.
+    MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", 3))
 
 # Instantiate a single settings object to import elsewhere
 settings = Settings()

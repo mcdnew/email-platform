@@ -3,11 +3,17 @@
 # Uses itsdangerous URLSafeSerializer to sign email addresses into
 # tamper-proof tokens. The token is embedded in unsubscribe links and
 # verified by the /unsubscribe endpoint.
+#
+# Uses UNSUBSCRIBE_SECRET (dedicated key) so rotating API_KEY does not
+# invalidate unsubscribe links already embedded in sent emails.
+# Falls back to API_KEY for backward compatibility when UNSUBSCRIBE_SECRET
+# is not set.
 
 from itsdangerous import URLSafeSerializer, BadSignature
 from app.config import settings
 
-serializer = URLSafeSerializer(settings.API_KEY or "dev-secret-change-in-production")
+_secret = settings.UNSUBSCRIBE_SECRET or settings.API_KEY or "dev-secret-change-in-production"
+serializer = URLSafeSerializer(_secret, salt="unsubscribe")
 
 
 def make_unsubscribe_token(email: str) -> str:
