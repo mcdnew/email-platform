@@ -67,13 +67,12 @@ else
   echo ""
 
   # API key
-  read -rp "  API key for the admin UI (leave blank to disable auth for local dev): " API_KEY
+  read -rp "  API key for the admin UI (leave blank to disable auth for local dev): " API_KEY </dev/tty
   API_KEY="${API_KEY:-}"
 
   # Postgres password (required — no default)
   while true; do
-    read -rsp "  PostgreSQL password (required): " POSTGRES_PASSWORD
-    echo ""
+    read -rsp "  PostgreSQL password (required): " POSTGRES_PASSWORD </dev/tty; echo ""
     [ -n "$POSTGRES_PASSWORD" ] && break
     warn "Password cannot be empty."
   done
@@ -81,13 +80,13 @@ else
   # SMTP
   echo ""
   echo "  SMTP settings (needed to actually send emails — you can update these later):"
-  read -rp "  SMTP server   [smtp.gmail.com]: "   SMTP_SERVER;   SMTP_SERVER="${SMTP_SERVER:-smtp.gmail.com}"
-  read -rp "  SMTP port     [587]: "               SMTP_PORT;     SMTP_PORT="${SMTP_PORT:-587}"
-  read -rp "  SMTP username [your@email.com]: "   SMTP_USER;     SMTP_USER="${SMTP_USER:-your@email.com}"
-  read -rsp "  SMTP password: "                    SMTP_PASSWORD; echo ""
+  read -rp "  SMTP server   [smtp.gmail.com]: "   SMTP_SERVER   </dev/tty; SMTP_SERVER="${SMTP_SERVER:-smtp.gmail.com}"
+  read -rp "  SMTP port     [587]: "               SMTP_PORT     </dev/tty; SMTP_PORT="${SMTP_PORT:-587}"
+  read -rp "  SMTP username [your@email.com]: "   SMTP_USER     </dev/tty; SMTP_USER="${SMTP_USER:-your@email.com}"
+  read -rsp "  SMTP password: "                    SMTP_PASSWORD </dev/tty; echo ""
 
   # Tracking base URL (optional)
-  read -rp "  Public URL for open/click tracking (e.g. https://yourdomain.com, or blank to skip): " TRACKING_BASE_URL
+  read -rp "  Public URL for open/click tracking (e.g. https://yourdomain.com, or blank to skip): " TRACKING_BASE_URL </dev/tty
 
   # Unsubscribe secret
   UNSUBSCRIBE_SECRET=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32 || echo "change-me-$(date +%s)")
