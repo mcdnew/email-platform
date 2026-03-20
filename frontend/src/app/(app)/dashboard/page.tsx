@@ -7,10 +7,10 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 import { TrendingUp, Mail, XCircle, Eye } from 'lucide-react'
 
 const STAT_COLORS: Record<string, string> = {
-  blue: 'text-blue-600 bg-blue-50',
-  green: 'text-green-600 bg-green-50',
-  red: 'text-red-600 bg-red-50',
-  purple: 'text-purple-600 bg-purple-50',
+  blue: 'text-blue-500',
+  green: 'text-emerald-500',
+  red: 'text-red-400',
+  purple: 'text-violet-500',
 }
 
 export default function DashboardPage() {
@@ -77,12 +77,12 @@ function StatCard({ icon: Icon, label, value, color }: {
   icon: React.ElementType; label: string; value: string | number; color: string
 }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4">
-      <div className={`inline-flex p-2 rounded-lg ${STAT_COLORS[color]} mb-2`}>
-        <Icon className="w-4 h-4" />
+    <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-start gap-3">
+      <Icon className={`w-4 h-4 mt-1 flex-shrink-0 ${STAT_COLORS[color]}`} />
+      <div>
+        <div className="text-2xl font-bold text-gray-900">{value}</div>
+        <div className="text-xs text-gray-500 mt-0.5">{label}</div>
       </div>
-      <div className="text-2xl font-bold text-gray-900">{value}</div>
-      <div className="text-xs text-gray-500 mt-0.5">{label}</div>
     </div>
   )
 }
