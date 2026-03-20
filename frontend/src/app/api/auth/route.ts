@@ -35,5 +35,6 @@ export async function POST(req: NextRequest) {
 export async function DELETE() {
   const res = NextResponse.json({ ok: true })
   res.cookies.delete('ep_key')
+  res.cookies.delete('api_key') // clear legacy cookie from old Streamlit session
   return res
 }
