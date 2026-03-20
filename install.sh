@@ -18,11 +18,15 @@ heading() { echo -e "\n${BOLD}$*${NC}"; }
 # ── 0. Resolve script directory (works both locally and via curl | bash) ──────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
 
-# If piped through bash (curl | bash), clone the repo first
+# If piped through bash (curl | bash), download the repo as a zip (no git needed)
 if [ ! -f "$SCRIPT_DIR/docker-compose.yml" ]; then
-  heading "Cloning email-platform..."
-  command -v git >/dev/null 2>&1 || error "git is required. Install it and re-run."
-  git clone https://github.com/mcdnew/email-platform.git email-platform
+  heading "Downloading email-platform..."
+  command -v curl >/dev/null 2>&1 || error "curl is required. Install it and re-run."
+  curl -fsSL https://github.com/mcdnew/email-platform/archive/refs/heads/main.zip -o /tmp/email-platform.zip
+  command -v unzip >/dev/null 2>&1 || error "unzip is required. Install it (e.g. apt install unzip) and re-run."
+  unzip -q /tmp/email-platform.zip -d /tmp/email-platform-extract
+  mv /tmp/email-platform-extract/email-platform-main email-platform
+  rm -rf /tmp/email-platform.zip /tmp/email-platform-extract
   cd email-platform
   SCRIPT_DIR="$(pwd)"
 else
