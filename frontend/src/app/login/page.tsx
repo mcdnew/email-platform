@@ -51,7 +51,6 @@ export default function LoginPage() {
               value={key}
               onChange={e => setKey(e.target.value)}
               placeholder="your-api-key"
-              required
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-500"
             />
           </div>
