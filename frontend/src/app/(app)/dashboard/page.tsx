@@ -88,7 +88,7 @@ function StatCard({ icon: Icon, label, value, color }: {
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-start gap-3">
       <Icon className={`w-4 h-4 mt-1 flex-shrink-0 ${STAT_COLORS[color]}`} />
       <div>
-        <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{value}</div>
+        <div className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">{value}</div>
         <div className="text-xs text-gray-500 mt-0.5">{label}</div>
       </div>
     </div>
