@@ -39,4 +39,7 @@ def test_sent_emails_list(client, db):
     _add_sent(db, "failed")
     resp = client.get("/sent-emails")
     assert resp.status_code == 200
-    assert len(resp.json()) == 2
+    data = resp.json()
+    # Paginated response: { items, total, page, per_page, pages }
+    assert data["total"] == 2
+    assert len(data["items"]) == 2

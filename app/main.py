@@ -18,7 +18,10 @@ from app.models import (
     Prospect, EmailTemplate, Sequence, SequenceStep,
     ScheduledEmail, SentEmail,
 )
-from app.schemas import AssignSequenceRequest, SequenceCreate, SequenceRead, TestEmailRequest
+from app.schemas import (
+    AssignSequenceRequest, SequenceCreate, SequenceRead, TestEmailRequest,
+    ProspectImport, StepReorderRequest,
+)
 from app.mailer import send_email
 from app.config import settings
 from app.tracking import load_unsubscribe_token
@@ -297,22 +300,57 @@ def mark_sent(sid: int, db: Session = Depends(get_session)):
     return {"message": "marked sent"}
 
 # ────────────── Prospects CRUD/List ──────────────
+#
+# Paginated, sorted, and searchable. Response shape:
+#   { items: [...], total: N, page: P, per_page: PP, pages: PG }
+#
+_PROSPECT_SORT = {
+    "name":       Prospect.name,
+    "email":      Prospect.email,
+    "company":    Prospect.company,
+    "created_at": Prospect.created_at,
+}
+
 @app.get("/prospects", dependencies=[Depends(require_api_key)])
 def list_prospects(
-    assigned: Optional[str] = None,
+    assigned:  Optional[str] = None,
+    page:      int = 1,
+    per_page:  int = 50,
+    sort_by:   str = "name",
+    order:     str = "asc",
+    search:    Optional[str] = None,
     db: Session = Depends(get_session),
 ):
+    page     = max(1, page)
+    per_page = min(200, max(1, per_page))
+
+    # Build filter list
+    filters = []
     if assigned is not None:
-        assigned = str(assigned).lower() in {"1", "true", "yes", "on"}
+        flag = str(assigned).lower() in {"1", "true", "yes", "on"}
+        filters.append(Prospect.sequence_id.is_not(None) if flag else Prospect.sequence_id.is_(None))
+    if search:
+        term = f"%{search}%"
+        filters.append(
+            (Prospect.name.ilike(term)) |
+            (Prospect.email.ilike(term)) |
+            (Prospect.company.ilike(term))
+        )
 
-    q = select(Prospect)
-    if assigned is True:
-        q = q.where(Prospect.sequence_id.is_not(None))
-    elif assigned is False:
-        q = q.where(Prospect.sequence_id.is_(None))
-    prospects = db.exec(q).all()
+    # Count (no offset/limit)
+    total = _scalar(db, select(func.count()).select_from(Prospect).where(*filters))
 
-    # Single GROUP BY query replaces per-sequence COUNT loop (fixes N+1)
+    # Sorted + paginated fetch
+    col = _PROSPECT_SORT.get(sort_by, Prospect.name)
+    prospects = db.exec(
+        select(Prospect)
+        .where(*filters)
+        .order_by(col.desc() if order == "desc" else col.asc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    ).all()
+
+    # Enrichment (same as before)
     step_counts = db.exec(
         select(SequenceStep.sequence_id, func.count(SequenceStep.id))
         .group_by(SequenceStep.sequence_id)
@@ -329,18 +367,46 @@ def list_prospects(
 
     seq_names = {s.id: s.name for s in db.exec(select(Sequence)).all()}
 
-    out = []
+    items = []
     for p in prospects:
-        total = steps_per_seq.get(p.sequence_id, 0)
-        done  = sum(1 for s in sched_map.get(p.id, []) if s.status in {"sent", "failed"})
-        out.append({
+        total_steps = steps_per_seq.get(p.sequence_id, 0)
+        done = sum(1 for s in sched_map.get(p.id, []) if s.status in {"sent", "failed"})
+        items.append({
             **p.dict(),
             "sequence_name":         seq_names.get(p.sequence_id),
-            "sequence_steps_total":  total,
+            "sequence_steps_total":  total_steps,
             "sequence_step_current": done,
-            "sequence_progress_pct": int(100 * done / total) if total else 0,
+            "sequence_progress_pct": int(100 * done / total_steps) if total_steps else 0,
         })
-    return out
+
+    return {
+        "items":    items,
+        "total":    total,
+        "page":     page,
+        "per_page": per_page,
+        "pages":    max(1, (total + per_page - 1) // per_page),
+    }
+
+
+@app.post("/prospects/bulk", dependencies=[Depends(require_api_key)])
+def bulk_import_prospects(items: List[ProspectImport], db: Session = Depends(get_session)):
+    """Accept a JSON array of prospects (parsed CSV from the frontend). Skip duplicates."""
+    imported = skipped = 0
+    errors = []
+    for item in items:
+        try:
+            crud.create_prospect(db, Prospect(
+                name=item.name, email=item.email,
+                company=item.company, title=item.title,
+            ))
+            imported += 1
+        except IntegrityError:
+            db.rollback()
+            skipped += 1
+        except Exception as exc:
+            db.rollback()
+            errors.append({"email": item.email, "error": str(exc)})
+    return {"imported": imported, "skipped": skipped, "errors": errors}
 
 @app.post("/prospects", dependencies=[Depends(require_api_key)])
 def add_prospect(p: Prospect, db: Session = Depends(get_session)):
@@ -441,6 +507,19 @@ def delete_step(step_id: int, db: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Step not found")
     return {"message": "deleted"}
 
+@app.post("/sequences/{sid}/reorder", dependencies=[Depends(require_api_key)])
+def reorder_steps(sid: int, payload: StepReorderRequest, db: Session = Depends(get_session)):
+    """Update delay_days for each step — persists drag-and-drop order from the frontend."""
+    if not db.get(Sequence, sid):
+        raise HTTPException(status_code=404, detail="Sequence not found")
+    for item in payload.steps:
+        step = db.get(SequenceStep, item.step_id)
+        if step and step.sequence_id == sid:
+            step.delay_days = item.delay_days
+            db.add(step)
+    db.commit()
+    return {"message": "reordered"}
+
 # ────────────── Templates CRUD ──────────────
 @app.get("/templates", dependencies=[Depends(require_api_key)])
 def list_templates(db: Session = Depends(get_session)):
@@ -471,15 +550,53 @@ def delete_template(tid: int, db: Session = Depends(get_session)):
     return {"message": "deleted"}
 
 # ────────────── Sent Emails & Analytics ──────────────
+_SENT_SORT = {
+    "sent_at": SentEmail.sent_at,
+    "status":  SentEmail.status,
+    "to":      SentEmail.to,
+}
+
 @app.get("/sent-emails", dependencies=[Depends(require_api_key)])
-def list_sent(db: Session = Depends(get_session)):
-    sent   = db.exec(select(SentEmail).order_by(SentEmail.sent_at.desc())).all()
+def list_sent(
+    page:          int = 1,
+    per_page:      int = 50,
+    sort_by:       str = "sent_at",
+    order:         str = "desc",
+    status_filter: Optional[str] = None,
+    db: Session = Depends(get_session),
+):
+    page     = max(1, page)
+    per_page = min(200, max(1, per_page))
+
+    filters = []
+    if status_filter:
+        filters.append(SentEmail.status == status_filter)
+
+    total = _scalar(db, select(func.count()).select_from(SentEmail).where(*filters))
+
+    col = _SENT_SORT.get(sort_by, SentEmail.sent_at)
+    sent = db.exec(
+        select(SentEmail)
+        .where(*filters)
+        .order_by(col.desc() if order == "desc" else col.asc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    ).all()
+
     tnames = _name_lookup(db, EmailTemplate)
     snames = _name_lookup(db, Sequence)
-    return [
+    items = [
         {**e.dict(), "template_name": tnames.get(e.template_id), "sequence_name": snames.get(e.sequence_id)}
         for e in sent
     ]
+
+    return {
+        "items":    items,
+        "total":    total,
+        "page":     page,
+        "per_page": per_page,
+        "pages":    max(1, (total + per_page - 1) // per_page),
+    }
 
 @app.get("/analytics/summary", dependencies=[Depends(require_api_key)])
 def analytics(db: Session = Depends(get_session)):

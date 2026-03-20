@@ -64,3 +64,18 @@ class ProspectRead(BaseModel):
     class Config:
         orm_mode = True
 
+# --- Bulk prospect import (CSV → JSON array) ---
+class ProspectImport(BaseModel):
+    name: str
+    email: str
+    company: Optional[str] = None
+    title: Optional[str] = None
+
+# --- Sequence step reorder ---
+class StepReorderItem(BaseModel):
+    step_id: int
+    delay_days: int
+
+class StepReorderRequest(BaseModel):
+    steps: List[StepReorderItem]
+

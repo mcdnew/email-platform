@@ -10,13 +10,9 @@
 
 ---
 
-## Pagination for GET /sent-emails and GET /prospects
-**What:** Add `?page=1&per_page=50` query params to `/sent-emails` and `/prospects` endpoints.
-**Why:** Both endpoints currently load all rows into memory. At 10k+ sent emails this becomes slow (full table scan) and memory-heavy (~10MB+ per request).
-**Pros:** Keeps API fast as volume grows. Simple to implement with SQLModel `offset`/`limit`.
-**Cons:** Requires coordinated frontend changes (Streamlit now, Next.js later). The Streamlit AgGrid table currently expects all rows at once.
-**Context:** Not urgent at current scale, but should be added before the Next.js frontend is built so the API contract is correct from day one.
-**Depends on:** Nothing — can be done anytime, ideally before or during Phase 2 (Next.js).
+## ~~Pagination for GET /sent-emails and GET /prospects~~
+**Completed:** Phase 2 (2026-03-20)
+Added `?page=&per_page=&sort_by=&order=&search=` to `/prospects` and `?page=&per_page=&sort_by=&order=&status_filter=` to `/sent-emails`. Both return `{ items, total, page, per_page, pages }`. TanStack Table in the Next.js frontend uses server-side sort/filter throughout.
 
 ---
 
@@ -27,6 +23,26 @@
 **Cons:** Requires a new env var and a migration path for existing tokens (or just accept a brief window of invalid links on first deploy).
 **Context:** `app/tracking.py:10` — `URLSafeSerializer(settings.API_KEY, salt="unsubscribe")`. Two separate secrets would let you rotate each independently.
 **Depends on:** Nothing.
+
+---
+
+## HTML email templates (Tiptap)
+**What:** Replace the plain `<textarea>` template editor with Tiptap (ProseMirror) to support HTML emails — bold, italic, links, images.
+**Why:** Phase 2 chose a plain textarea + live preview because current emails are plain-text. If HTML emails are ever needed, Tiptap is the right WYSIWYG editor for Next.js.
+**Pros:** Rich formatting. Supports branded emails with inline styles.
+**Cons:** ~150KB bundle addition. Requires a custom Tiptap extension for `{{name}}`-style variable insertion. HTML→plain-text round-trip for SMTP multipart emails.
+**Context:** Phase 2 deferred this in eng review (2026-03-20). Templates currently use `{{variable}}` Jinja-style syntax in plain text. Server-side rendering via Jinja2 is already wired.
+**Depends on:** Phase 2 complete.
+
+---
+
+## Playwright e2e smoke tests
+**What:** Add Playwright tests covering the critical happy path: login → create prospect → assign sequence → verify scheduled email appears in queue.
+**Why:** Vitest + Testing Library covers all unit/integration paths. Playwright covers the full stack integration that unit tests can't — real browser, real Next.js, real FastAPI.
+**Pros:** Catches integration regressions that unit tests miss. Runs in CI as a deployment gate.
+**Cons:** Requires a running stack in CI (Docker Compose or docker-compose up in the CI job). Tests are slower (5-30s) and brittle to UI changes.
+**Context:** Deferred during Phase 2 eng review (2026-03-20) in favor of Vitest for speed. Add as a Phase 3 supplement once the frontend is stable.
+**Depends on:** Phase 2 complete (Next.js frontend stable).
 
 ---
 

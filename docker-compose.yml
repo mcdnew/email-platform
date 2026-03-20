@@ -33,11 +33,10 @@ services:
     depends_on:
       - backend
     ports:
-      - "8501:8501"
-    env_file:
-      - ./frontend/.env
+      - "3000:3000"
     environment:
       API_URL: "http://backend:8000"
+      NODE_ENV: "production"
 
 volumes:
   db_data:

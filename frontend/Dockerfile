@@ -1,15 +1,19 @@
-FROM python:3.10-slim
-
-RUN apt-get update && apt-get install -y build-essential && rm -rf /var/lib/apt/lists/*
-
+FROM node:20-alpine AS base
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+FROM base AS deps
+COPY package.json package-lock.json* ./
+RUN npm ci
 
+FROM base AS builder
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN npm run build
 
-EXPOSE 8501
-
-CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
-
+FROM base AS runner
+ENV NODE_ENV=production
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+EXPOSE 3000
+ENV PORT=3000
+CMD ["node", "server.js"]

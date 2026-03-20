@@ -10,14 +10,15 @@ def test_create_and_list_prospect(client):
     assert resp.status_code == 200
     resp = client.get("/prospects")
     assert resp.status_code == 200
-    assert any(p["email"] == "alice@x.com" for p in resp.json())
+    # Paginated response: { items, total, page, per_page, pages }
+    assert any(p["email"] == "alice@x.com" for p in resp.json()["items"])
 
 
 def test_delete_prospect(client):
     r = client.post("/prospects", json={"name": "Bob", "email": "bob@x.com"})
     pid = r.json()["id"]
     assert client.delete(f"/prospects/{pid}").status_code == 200
-    prospects = client.get("/prospects").json()
+    prospects = client.get("/prospects").json()["items"]
     assert not any(p["id"] == pid for p in prospects)
 
 
@@ -90,6 +91,84 @@ def test_delete_sequence_cascades(client):
     # Scheduled emails are gone
     scheduled = client.get("/scheduled-emails").json()
     assert not any(e["prospect_id"] == p["id"] for e in scheduled)
+
+
+# ── Bulk import ──────────────────────────────────────────────────────────────
+
+def test_bulk_import_prospects(client):
+    """POST /prospects/bulk accepts a JSON array and imports valid rows."""
+    resp = client.post("/prospects/bulk", json=[
+        {"name": "Alice", "email": "bulk_a@x.com"},
+        {"name": "Bob",   "email": "bulk_b@x.com", "company": "Acme"},
+    ])
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["imported"] == 2
+    assert data["skipped"] == 0
+    assert data["errors"] == []
+
+    items = client.get("/prospects").json()["items"]
+    emails = [p["email"] for p in items]
+    assert "bulk_a@x.com" in emails
+    assert "bulk_b@x.com" in emails
+
+
+def test_bulk_import_skips_duplicates(client):
+    """Duplicate emails in a bulk import are counted as skipped, not errors."""
+    client.post("/prospects", json={"name": "Alice", "email": "dup_bulk@x.com"})
+    resp = client.post("/prospects/bulk", json=[
+        {"name": "Alice Again", "email": "dup_bulk@x.com"},  # duplicate
+    ])
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["imported"] == 0
+    assert data["skipped"] == 1
+
+
+# ── Pagination ────────────────────────────────────────────────────────────────
+
+def test_prospects_pagination(client):
+    """GET /prospects returns paginated shape with total/page/per_page/pages."""
+    resp = client.get("/prospects?page=1&per_page=10")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "items" in data
+    assert "total" in data
+    assert "page" in data
+    assert "per_page" in data
+    assert "pages" in data
+    assert data["page"] == 1
+    assert data["per_page"] == 10
+
+
+def test_prospects_search(client):
+    """GET /prospects?search= returns only matching rows."""
+    client.post("/prospects", json={"name": "Searchable Prospect", "email": "search_unique@x.com"})
+    resp = client.get("/prospects?search=search_unique")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] >= 1
+    assert any(p["email"] == "search_unique@x.com" for p in data["items"])
+
+
+def test_sequences_reorder(client):
+    """POST /sequences/{sid}/reorder updates delay_days for each step."""
+    t1 = client.post("/templates", json={"name": "T1", "subject": "S1", "body": "B"}).json()
+    t2 = client.post("/templates", json={"name": "T2", "subject": "S2", "body": "B"}).json()
+    s = client.post("/sequences", json={"name": "Reorder Test"}).json()
+    s1 = client.post(f"/sequences/{s['id']}/steps", json={"sequence_id": s["id"], "template_id": t1["id"], "delay_days": 0}).json()
+    s2 = client.post(f"/sequences/{s['id']}/steps", json={"sequence_id": s["id"], "template_id": t2["id"], "delay_days": 3}).json()
+
+    # Reorder: swap delay_days
+    resp = client.post(f"/sequences/{s['id']}/reorder", json={
+        "steps": [{"step_id": s1["id"], "delay_days": 3}, {"step_id": s2["id"], "delay_days": 0}]
+    })
+    assert resp.status_code == 200
+
+    steps = client.get(f"/sequences/{s['id']}/steps").json()
+    step_map = {step["id"]: step["delay_days"] for step in steps}
+    assert step_map[s1["id"]] == 3
+    assert step_map[s2["id"]] == 0
 
 
 # ── Assign sequence ───────────────────────────────────────────────────────────

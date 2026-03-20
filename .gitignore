@@ -37,3 +37,4 @@ docker-compose.override.yml
 # !test_prospects.csv
 test_prospects.csv
 
+.gstack/
