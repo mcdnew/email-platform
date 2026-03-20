@@ -53,7 +53,10 @@ export default function QueuePage() {
             {isLoading ? (
               <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400 text-sm">Loading…</td></tr>
             ) : !filtered?.length ? (
-              <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400 text-sm">Queue is empty.</td></tr>
+              <tr><td colSpan={6} className="px-3 py-12 text-center">
+                <p className="text-gray-500 text-sm font-medium">Queue is empty</p>
+                <p className="text-gray-400 text-xs mt-1">Assign a sequence to prospects to schedule emails.</p>
+              </td></tr>
             ) : filtered.map(e => (
               <tr key={e.id} className="hover:bg-gray-50">
                 <td className="px-3 py-2.5 font-medium text-gray-900">{e.prospect_name ?? '—'}</td>

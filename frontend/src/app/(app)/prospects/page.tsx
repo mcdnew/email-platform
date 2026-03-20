@@ -227,7 +227,10 @@ export default function ProspectsPage() {
             {isLoading ? (
               <tr><td colSpan={7} className="px-3 py-8 text-center text-gray-400 text-sm">Loading…</td></tr>
             ) : table.getRowModel().rows.length === 0 ? (
-              <tr><td colSpan={7} className="px-3 py-8 text-center text-gray-400 text-sm">No prospects found.</td></tr>
+              <tr><td colSpan={7} className="px-3 py-12 text-center">
+                <p className="text-gray-500 text-sm font-medium">No prospects yet</p>
+                <p className="text-gray-400 text-xs mt-1">Import a CSV or add your first prospect above.</p>
+              </td></tr>
             ) : table.getRowModel().rows.map(row => (
               <tr key={row.id} className="hover:bg-gray-50">
                 {row.getVisibleCells().map(cell => (

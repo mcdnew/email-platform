@@ -75,7 +75,10 @@ export default function TemplatesPage() {
             </div>
           ))}
           {templates?.length === 0 && (
-            <p className="text-gray-400 text-sm py-4">No templates yet. Create one to get started.</p>
+            <div className="py-12 text-center">
+              <p className="text-gray-500 text-sm font-medium">No templates yet</p>
+              <p className="text-gray-400 text-xs mt-1">Create your first template to start sending emails.</p>
+            </div>
           )}
         </div>
       )}

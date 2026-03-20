@@ -108,7 +108,12 @@ export default function SequencesPage() {
               <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" />
             </button>
           ))}
-          {!sequences?.length && <p className="text-xs text-gray-400 px-3 py-2">No sequences yet.</p>}
+          {!sequences?.length && (
+            <div className="px-3 py-4 text-center">
+              <p className="text-xs font-medium text-gray-500">No sequences yet</p>
+              <p className="text-xs text-gray-400 mt-0.5">Press + to create one.</p>
+            </div>
+          )}
         </div>
       </div>
 

@@ -41,7 +41,10 @@ export default function SentPage() {
             {isLoading ? (
               <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400 text-sm">Loading…</td></tr>
             ) : !data?.items.length ? (
-              <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400 text-sm">No emails found.</td></tr>
+              <tr><td colSpan={6} className="px-3 py-12 text-center">
+                <p className="text-gray-500 text-sm font-medium">No emails yet</p>
+                <p className="text-gray-400 text-xs mt-1">Sent emails will appear here once the scheduler runs.</p>
+              </td></tr>
             ) : data.items.map(e => (
               <tr key={e.id} className="hover:bg-gray-50">
                 <td className="px-3 py-2.5 font-medium text-gray-900 text-xs">{e.to}</td>
