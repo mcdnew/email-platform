@@ -1,6 +1,6 @@
 # Email Platform Deployment Guide
 
-This guide walks you through two deployment methods for your Email Platform + Streamlit frontend:
+This guide walks you through two deployment methods for your Email Platform + Next.js frontend:
 
 - **A. Bare-metal** on an Ubuntu Lightsail instance (no Docker)  
 - **B. Docker-Compose** on an Ubuntu Lightsail instance  
@@ -21,9 +21,9 @@ Each section is broken into clear, copy-&-paste steps so even beginners can foll
 
 Once it's up, note its **public IP**. Under **Networking**, add firewall rules to open:
 
-- TCP **22** (SSH)  
-- TCP **8000** (Backend API)  
-- TCP **8501** (Streamlit frontend)
+- TCP **22** (SSH)
+- TCP **8000** (Backend API)
+- TCP **3000** (Next.js frontend)
 
 ### 2. SSH into the Server
 
@@ -82,7 +82,6 @@ TIMEZONE=Europe/Paris
 # API key — protects all backend endpoints. Generate with:
 # python -c "import secrets; print(secrets.token_hex(32))"
 API_KEY=
-APP_PASSWORD=your-ui-password
 ```
 
 ### 6. Install & Migrate the Backend
@@ -139,36 +138,35 @@ sudo systemctl enable email-backend
 sudo systemctl start email-backend
 ```
 
-### 8. Clone & Configure the Frontend
-
-In a separate folder (or the same):
+### 8. Install Node.js & Configure the Frontend
 
 ```bash
-cd ~
-git clone https://github.com/yourusername/email-platform.git frontend
-cd frontend
-cp frontend/.env.example frontend/.env
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
 ```
 
-Edit `frontend/.env` and set:
+Then create the frontend env file:
+
+```bash
+cp ~/email-platform/frontend/.env.example ~/email-platform/frontend/.env.local
+```
+
+Edit `frontend/.env.local` and set:
 
 ```ini
 API_URL=http://YOUR_LIGHTSAIL_IP:8000
 ```
 
-### 9. Install & Run the Frontend
+### 9. Build & Run the Frontend
 
 ```bash
-cd ~/frontend
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt  # should include streamlit and st-aggrid etc.
-
-streamlit run frontend/main.py --server.port 8501 --server.address 0.0.0.0
+cd ~/email-platform/frontend
+npm install
+npm run build
+npm start -- -p 3000
 ```
 
-Visit `http://YOUR_LIGHTSAIL_IP:8501` in your browser.
+Visit `http://YOUR_LIGHTSAIL_IP:3000` in your browser.
 
 #### Optional—systemd service
 
@@ -176,14 +174,14 @@ Create `/etc/systemd/system/email-frontend.service`:
 
 ```ini
 [Unit]
-Description=Email Platform Frontend
+Description=Email Platform Frontend (Next.js)
 After=network.target
 
 [Service]
 User=ubuntu
-WorkingDirectory=/home/ubuntu/frontend
-ExecStart=/home/ubuntu/frontend/venv/bin/streamlit run frontend/main.py \
-          --server.port 8501 --server.address 0.0.0.0
+WorkingDirectory=/home/ubuntu/email-platform/frontend
+Environment=PORT=3000
+ExecStart=/usr/bin/npm start -- -p 3000
 Restart=always
 
 [Install]
@@ -204,7 +202,7 @@ sudo systemctl start email-frontend
 
 ### 1. Launch & Configure the Lightsail Instance
 
-Follow **A.1** and **A.2** above (open ports 22, 8000, 8501).
+Follow **A.1** and **A.2** above (open ports 22, 8000, 3000).
 
 ### 2. Install Docker & Docker-Compose
 
@@ -271,10 +269,9 @@ TIMEZONE=Europe/Paris
 # API key — protects all backend endpoints. Generate with:
 # python -c "import secrets; print(secrets.token_hex(32))"
 API_KEY=
-APP_PASSWORD=your-ui-password
 ```
 
-Edit `frontend/.env`:
+Edit `frontend/.env.local`:
 
 ```ini
 API_URL=http://backend:8000
@@ -290,7 +287,7 @@ This starts three services:
 
 - **db** (Postgres)
 - **backend** (FastAPI + Uvicorn)
-- **frontend** (Streamlit)
+- **frontend** (Next.js)
 
 Check status:
 
@@ -308,7 +305,7 @@ docker-compose logs -f frontend
 ### 5. Verify & Access
 
 - **Backend OpenAPI:** `http://YOUR_LIGHTSAIL_IP:8000/docs`
-- **Frontend:** `http://YOUR_LIGHTSAIL_IP:8501`
+- **Frontend:** `http://YOUR_LIGHTSAIL_IP:3000`
 
 ### 6. Auto-Start on Reboot
 

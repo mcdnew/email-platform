@@ -3,7 +3,7 @@
 A modern, full-stack email campaign platform built with:
 
 - ✅ FastAPI backend with SQLModel and Alembic migrations
-- ✅ Streamlit frontend with a smooth UI and dashboard
+- ✅ Next.js 14 frontend with TypeScript, Tailwind CSS, and TanStack Table
 - ✅ PostgreSQL (recommended) or SQLite for local dev
 - ✅ SMTP email sending with scheduling, analytics, and sequences
 - ✅ API key authentication (`X-API-Key` header) on all endpoints
@@ -23,7 +23,7 @@ A modern, full-stack email campaign platform built with:
 - 🔐 API key auth — all endpoints require `X-API-Key` (disabled when unset for local dev)
 - 🚫 Unsubscribe links via signed tokens (itsdangerous) — purges pending emails on click
 - 🧪 Send test emails before launch
-- 🌙 Auto dark mode with responsive frontend
+- 📱 Mobile-responsive frontend with sidebar nav and hamburger drawer
 - 🐳 Docker or bare-metal deployment
 
 ---
@@ -34,7 +34,7 @@ A modern, full-stack email campaign platform built with:
 
 - Python 3.10+
 - PostgreSQL 13+ running locally
-- Node.js *(optional — for AgGrid custom builds)*
+- Node.js 18+ *(required for the Next.js frontend)*
 - Virtualenv or Pipenv
 
 ### For **Docker Deployment**:
@@ -112,14 +112,15 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-### 2. Start the Streamlit frontend
+### 2. Start the Next.js frontend
 
 ```bash
 cd frontend
-streamlit run main.py
+npm install
+npm run dev
 ```
 
-**Visit:** http://localhost:8501
+**Visit:** http://localhost:3000
 
 ---
 
@@ -133,7 +134,7 @@ docker compose up --build
 
 ### 2. Check services
 
-- **Frontend:** http://localhost:8501
+- **Frontend:** http://localhost:3000
 - **Backend API:** http://localhost:8000/docs
 
 ---
@@ -141,7 +142,7 @@ docker compose up --build
 ## 🔐 Environment Files
 
 - **`.env`**: root config for backend and database (see `.env.example` for all variables)
-- **`frontend/.env`**: contains `API_URL` and `APP_PASSWORD` for the Streamlit frontend
+- **`frontend/.env.local`**: contains `API_URL` for the Next.js frontend (points to FastAPI backend)
 
 Key variables added in Phase 1 hardening:
 
@@ -198,7 +199,7 @@ Dashboard shows:
 | Database errors | Recreate the DB or use `alembic downgrade base` then `upgrade head` |
 | Email not sending | Check status = `pending` and `send_at` is in the past, then run force-scheduler |
 | Cannot delete sequence/template | Remove it from all sequence steps first |
-| Port already in use | Stop other services on 8000/8501 or change ports in `docker-compose.yml` |
+| Port already in use | Stop other services on 8000/3000 or change ports in `docker-compose.yml` |
 | 401 Unauthorized | Set `API_KEY` in `.env` (or leave empty to disable auth in dev) |
 | Unsubscribe link broken | Ensure `API_KEY` hasn't changed since the link was generated — tokens are signed with it |
 
@@ -293,7 +294,13 @@ email-platform/
 │   └── routes/
 │       └── open_tracking.py  # GET /track_open — pixel endpoint
 ├── frontend/
-│   └── main.py          # Streamlit UI
+│   ├── src/app/         # Next.js 14 App Router pages
+│   │   ├── (app)/       # Authenticated layout (dashboard, prospects, templates, sequences, queue, sent, settings)
+│   │   ├── api/         # Next.js API routes (auth cookie + proxy to FastAPI)
+│   │   └── login/       # Login page
+│   ├── src/components/  # AppShell, PaginationBar, StatusBadge, Toast
+│   ├── src/lib/         # API client (api.ts), type definitions (types.ts)
+│   └── package.json     # Next.js 14, TanStack Table, Recharts, React Query
 ├── migrations/
 │   └── versions/        # Alembic migration files
 ├── tests/               # pytest suite (42 tests, 71% coverage)
