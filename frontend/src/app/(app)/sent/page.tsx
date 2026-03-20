@@ -19,9 +19,9 @@ export default function SentPage() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-wrap items-center justify-between gap-y-2 mb-5">
         <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Sent History</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={() => downloadCsv(
             (data?.items ?? []).map(e => ({ to: e.to, subject: e.subject, template: e.template_name ?? '', sequence: e.sequence_name ?? '', sent_at: e.sent_at, status: e.status })),

@@ -196,9 +196,9 @@ export default function ProspectsPage() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-wrap items-center justify-between gap-y-2 mb-5">
         <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Prospects</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {selectedIds.length > 0 && (
             <button onClick={() => setAssignModal(selectedIds)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors">
