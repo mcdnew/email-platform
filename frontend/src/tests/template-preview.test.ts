@@ -7,6 +7,10 @@ function renderPreview(body: string): string {
   })
 }
 
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 describe('Template preview rendering', () => {
   it('substitutes known variables', () => {
     expect(renderPreview('Hi {{name}}, welcome to {{company}}'))
@@ -27,5 +31,32 @@ describe('Template preview rendering', () => {
 
   it('substitutes multiple occurrences', () => {
     expect(renderPreview('{{name}} and {{name}}')).toBe('Alice and Alice')
+  })
+
+  it('substitutes variables inside HTML tags', () => {
+    expect(renderPreview('<p>Hi {{name}}, welcome to {{company}}!</p>'))
+      .toBe('<p>Hi Alice, welcome to Acme Corp!</p>')
+  })
+})
+
+describe('stripHtml', () => {
+  it('strips simple tags', () => {
+    expect(stripHtml('<p>Hello world</p>')).toBe('Hello world')
+  })
+
+  it('strips nested tags', () => {
+    expect(stripHtml('<h2>Subject</h2><p>Body <strong>text</strong></p>')).toBe('Subject Body text')
+  })
+
+  it('collapses multiple spaces', () => {
+    expect(stripHtml('<p>  foo  </p><p>  bar  </p>')).toBe('foo bar')
+  })
+
+  it('returns empty string for empty input', () => {
+    expect(stripHtml('')).toBe('')
+  })
+
+  it('returns plain text unchanged', () => {
+    expect(stripHtml('No tags here')).toBe('No tags here')
   })
 })

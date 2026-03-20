@@ -6,14 +6,21 @@ import { getTemplates, createTemplate, updateTemplate, deleteTemplate } from '@/
 import type { EmailTemplate } from '@/lib/types'
 import { Toast } from '@/components/Toast'
 import { useToast } from '@/hooks/useToast'
+import { TiptapEditor } from '@/components/TiptapEditor'
 import { Plus, Trash2, Edit2, X, Eye } from 'lucide-react'
 
 const PREVIEW_SAMPLES: Record<string, string> = {
   name: 'Alice', email: 'alice@example.com', company: 'Acme Corp', title: 'CEO',
 }
 
-function renderPreview(body: string): string {
-  return body.replace(/\{\{(\w+)\}\}/g, (_, key) => PREVIEW_SAMPLES[key] ?? `{{${key}}}`)
+/** Replace {{variable}} tokens with sample values for the live preview. */
+function renderPreview(html: string): string {
+  return html.replace(/\{\{(\w+)\}\}/g, (_, key) => PREVIEW_SAMPLES[key] ?? `{{${key}}}`)
+}
+
+/** Strip HTML tags to produce a plain-text snippet for the card list. */
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
 export default function TemplatesPage() {
@@ -44,7 +51,11 @@ export default function TemplatesPage() {
         <TemplateForm
           initial={editing ?? undefined}
           onClose={() => { setShowNew(false); setEditing(null) }}
-          onSaved={() => { setShowNew(false); setEditing(null); qc.invalidateQueries({ queryKey: ['templates'] }); showToast(editing ? 'Updated' : 'Created') }}
+          onSaved={() => {
+            setShowNew(false); setEditing(null)
+            qc.invalidateQueries({ queryKey: ['templates'] })
+            showToast(editing ? 'Updated' : 'Created')
+          }}
           onError={(msg) => showToast(msg, 'err')}
         />
       )}
@@ -59,7 +70,7 @@ export default function TemplatesPage() {
                 <div className="flex-1 min-w-0">
                   <h3 className="font-medium text-gray-900 text-sm">{t.name}</h3>
                   <p className="text-xs text-gray-500 mt-0.5">{t.subject}</p>
-                  <p className="text-xs text-gray-400 mt-1 line-clamp-2">{t.body}</p>
+                  <p className="text-xs text-gray-400 mt-1 line-clamp-2">{stripHtml(t.body)}</p>
                 </div>
                 <div className="flex gap-1 ml-3">
                   <button onClick={() => setEditing(t)}
@@ -100,6 +111,7 @@ function TemplateForm({ initial, onClose, onSaved, onError }: {
     body: initial?.body ?? '',
   })
   const [loading, setLoading] = useState(false)
+  const [tab, setTab] = useState<'edit' | 'preview'>('edit')
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -132,24 +144,47 @@ function TemplateForm({ initial, onClose, onSaved, onError }: {
           <input required value={form.subject} onChange={e => setForm(v => ({ ...v, subject: e.target.value }))}
             className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Body</label>
-            <textarea required rows={8} value={form.body} onChange={e => setForm(v => ({ ...v, body: e.target.value }))}
-              placeholder="Hi {{name}}, ..."
-              aria-label="Template body"
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono resize-none" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1 mb-1">
-              <Eye className="w-3 h-3 text-gray-400" />
-              <label className="text-xs font-medium text-gray-600">Live preview</label>
+
+        {/* Body editor with tab switcher */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs font-medium text-gray-600">Body</label>
+            <div className="flex items-center gap-0.5 bg-gray-100 rounded-md p-0.5">
+              <button
+                type="button"
+                onClick={() => setTab('edit')}
+                className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${
+                  tab === 'edit' ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('preview')}
+                className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${
+                  tab === 'preview' ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Eye className="w-3 h-3" /> Preview
+              </button>
             </div>
-            <div className="h-[calc(8*1.5rem+1rem)] px-3 py-2 text-sm border border-dashed border-gray-300 rounded-lg bg-gray-50 overflow-auto whitespace-pre-wrap text-gray-700">
-              {renderPreview(form.body) || <span className="text-gray-400">Preview will appear here…</span>}
-            </div>
           </div>
+
+          {tab === 'edit' ? (
+            <TiptapEditor
+              value={form.body}
+              onChange={body => setForm(v => ({ ...v, body }))}
+              placeholder="Hi {{name}}, …"
+            />
+          ) : (
+            <div
+              className="prose-preview min-h-[160px] px-3 py-2 text-sm border border-dashed border-gray-300 rounded-lg bg-gray-50 overflow-auto"
+              dangerouslySetInnerHTML={{ __html: renderPreview(form.body) || '<span style="color:#9ca3af">Preview will appear here…</span>' }}
+            />
+          )}
         </div>
+
         <div className="flex gap-2 pt-1">
           <button type="submit" disabled={loading}
             className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">

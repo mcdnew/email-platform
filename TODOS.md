@@ -1,12 +1,8 @@
 # TODOS
 
-## Retry logic for failed emails
-**What:** Add a `POST /retry-failed` endpoint (and optional cron) that retries `ScheduledEmail` rows with `status='failed'`, up to a configurable `max_retries` limit.
-**Why:** Failed emails currently sit in the queue forever with no automatic recovery. Transient SMTP failures (timeouts, hiccups) require manual intervention to re-send.
-**Pros:** Handles transient failures automatically. Improves deliverability without manual monitoring.
-**Cons:** Requires adding `retry_count` field to `ScheduledEmail` model and a new Alembic migration. Must distinguish transient failures (retry) from permanent ones (bad address — don't retry).
-**Context:** The `_process_emails()` refactor in Phase 1 makes this easy to bolt on — just call the same function with a filtered set of failed emails and a `max_retries` check. Start with a manual endpoint, add auto-retry later.
-**Depends on:** Phase 1 hardening complete (especially `_process_emails()` refactor).
+## ~~Retry logic for failed emails~~
+**Completed:** v1.0 (2026-03-20) — commit `a57c9ed`
+`POST /retry-failed` endpoint added. Resets failed emails to pending (up to `MAX_RETRIES`), skips unsubscribed/deleted prospects, re-runs `_process_emails`. `retry_count` field added to `ScheduledEmail` with Alembic migration. 10 regression tests in `tests/test_retry_and_unsubscribe_secret.py`.
 
 ---
 
@@ -16,13 +12,9 @@ Added `?page=&per_page=&sort_by=&order=&search=` to `/prospects` and `?page=&per
 
 ---
 
-## Separate UNSUBSCRIBE_SECRET from API_KEY
-**What:** Add a dedicated `UNSUBSCRIBE_SECRET` env var for signing unsubscribe tokens, separate from `API_KEY`.
-**Why:** `tracking.py` currently uses `settings.API_KEY` as the signing secret for `itsdangerous` unsubscribe tokens. This couples token security to API credentials — if the API key is rotated, all existing unsubscribe links in already-sent emails break.
-**Pros:** API key rotation no longer invalidates existing unsubscribe links. Cleaner separation of concerns.
-**Cons:** Requires a new env var and a migration path for existing tokens (or just accept a brief window of invalid links on first deploy).
-**Context:** `app/tracking.py:10` — `URLSafeSerializer(settings.API_KEY, salt="unsubscribe")`. Two separate secrets would let you rotate each independently.
-**Depends on:** Nothing.
+## ~~Separate UNSUBSCRIBE_SECRET from API_KEY~~
+**Completed:** v1.0 (2026-03-20) — commit `5d079cc`
+`UNSUBSCRIBE_SECRET` env var added to `app/config.py` and `app/tracking.py`. Falls back to `API_KEY` then `dev-secret` for backward compat. Rotating `API_KEY` no longer invalidates existing unsubscribe links. Regression tests in `tests/test_retry_and_unsubscribe_secret.py`.
 
 ---
 
