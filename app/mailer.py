@@ -1,6 +1,8 @@
 # email-platform/app/mailer.py
-# 📄 Supports multipart/alternative emails with Jinja2 {{placeholders}}
+# Supports multipart/alternative emails with Jinja2 {{placeholders}} and open tracking.
 
+import logging
+import os
 import smtplib
 import html2text
 from email.mime.text import MIMEText
@@ -10,17 +12,20 @@ from jinja2.exceptions import UndefinedError
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
+
+# Base URL for tracking pixel — set TRACKING_BASE_URL in .env (e.g. https://yourdomain.com)
+TRACKING_BASE_URL = os.getenv("TRACKING_BASE_URL", "").rstrip("/")
+
 
 def render_template(text: str, context: dict) -> str:
-    """
-    Replace {{placeholders}} using Jinja2 and prospect context.
-    """
+    """Replace {{placeholders}} using Jinja2 and prospect context."""
     try:
         template = Template(text, undefined=StrictUndefined)
         return template.render(**context)
     except UndefinedError as e:
-        print(f"⚠️ Template rendering error: {e}")
-        return text  # fallback
+        logger.warning("Template rendering error: %s", e)
+        return text  # fallback to raw body
 
 
 def send_email(
@@ -28,21 +33,36 @@ def send_email(
     subject: str,
     body: str,
     bcc_email: str = None,
-    context: dict = None
+    context: dict = None,
+    email_id: int = None,
 ) -> bool:
     """
-    Sends multipart/alternative email using SMTP. Renders body via Jinja2 if context is provided.
-    Includes both plain-text and HTML versions.
+    Send a multipart/alternative email via SMTP.
+
+    - Renders Jinja2 placeholders if context is provided.
+    - Appends an open-tracking pixel if email_id is given and TRACKING_BASE_URL is set.
+    - Returns True on success, False on any SMTP failure.
+
+    Flow when called from the scheduler:
+      1. SentEmail row is pre-inserted with status='sending' to get its ID.
+      2. That ID is passed here as email_id.
+      3. The tracking pixel src points to /track_open?email_id=<id>.
+      4. Caller updates SentEmail status to 'sent' or 'failed' after this returns.
     """
-    # Jinja2 rendering
     if context:
         subject = render_template(subject, context)
         body = render_template(body, context)
 
-    # Convert HTML body to plain text
+    # Append open-tracking pixel to HTML body
+    if email_id and TRACKING_BASE_URL:
+        pixel = (
+            f'<img src="{TRACKING_BASE_URL}/track_open?email_id={email_id}" '
+            f'width="1" height="1" alt="" style="display:none;" />'
+        )
+        body = body + pixel
+
     plain_text = html2text.html2text(body)
 
-    # Build message
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = settings.SMTP_USER
@@ -60,6 +80,5 @@ def send_email(
             server.send_message(msg)
         return True
     except Exception as e:
-        print(f"❌ Failed to send email to {to_email}: {e}")
+        logger.error("Failed to send email to %s: %s", to_email, e)
         return False
-

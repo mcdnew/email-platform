@@ -57,10 +57,15 @@ class Settings:
     # Maximum emails sent per calendar day
     MAX_EMAILS_PER_DAY: int = int(os.getenv("MAX_EMAILS_PER_DAY", 100))
 
-    # ── Scheduler Secret (optional) ──────────────────────────────────────────────
-    # If you protect your /run-scheduler endpoint with a token,
-    # define it here and check it in your FastAPI route.
-    SCHEDULER_SECRET: str = os.getenv("SCHEDULER_SECRET", "")
+    # ── API Auth ─────────────────────────────────────────────────────────────────
+    # Secret key for X-API-Key header auth on all endpoints.
+    # Also used for signing unsubscribe tokens (itsdangerous).
+    # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+    API_KEY: str = os.getenv("API_KEY", "")
+
+    # ── Scheduler / Send Window ──────────────────────────────────────────────────
+    # Timezone for send window enforcement (pytz timezone string).
+    TIMEZONE: str = os.getenv("TIMEZONE", "Europe/Paris")
 
 # Instantiate a single settings object to import elsewhere
 settings = Settings()

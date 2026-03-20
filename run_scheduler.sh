@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 📄 /home/mcd/email-platform/run_scheduler.sh
+# Scheduler cron entrypoint — runs every 15 minutes via Docker cron
 
-BASEDIR=/home/mcd/email-platform
+BASEDIR=/app
 LOGDIR=$BASEDIR/logs
 LOGFILE=$LOGDIR/cron_invocations.log
 ARCHIVE=$LOGDIR/archive

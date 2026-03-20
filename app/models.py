@@ -4,9 +4,12 @@
 
 from typing import Optional
 from sqlmodel import SQLModel, Field
+from sqlalchemy import UniqueConstraint
 from datetime import datetime
 
 class Prospect(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("email", name="uq_prospect_email"),)
+
     id: Optional[int] = Field(default=None, primary_key=True)
     title: Optional[str] = None
     name: str
@@ -54,11 +57,6 @@ class SentEmail(SQLModel, table=True):
     prospect_id: Optional[int] = Field(default=None, foreign_key="prospect.id")
     template_id: Optional[int] = Field(default=None, foreign_key="emailtemplate.id")  # <-- ADD THIS
     sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")      # <-- OPTIONAL: if you need sequence info
-
-class EmailTemplateCreate(SQLModel):
-    name: str
-    subject: str
-    body: str
 
 class EmailTemplateUpdate(SQLModel):
     name: Optional[str] = None

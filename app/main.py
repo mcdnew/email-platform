@@ -1,4 +1,4 @@
-# 📄 app/main.py  – full, updated to cascade deletes and purge orphaned scheduled emails
+# app/main.py
 
 import os
 import logging
@@ -6,13 +6,14 @@ from datetime import datetime, date, time
 from typing import List, Optional
 
 import pytz
-from fastapi import FastAPI, HTTPException, Depends, Request, status
+from fastapi import FastAPI, HTTPException, Depends, Request, Security, status
 from fastapi.responses import JSONResponse, HTMLResponse
-from sqlmodel import Session, select
+from fastapi.security.api_key import APIKeyHeader
+from sqlmodel import Session, select, update
 from sqlalchemy import func, delete
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_session
-# from app.database import init_db    ← no longer needed
 from app.models import (
     Prospect, EmailTemplate, Sequence, SequenceStep,
     ScheduledEmail, SentEmail,
@@ -20,6 +21,7 @@ from app.models import (
 from app.schemas import AssignSequenceRequest, SequenceCreate, SequenceRead, TestEmailRequest
 from app.mailer import send_email
 from app.config import settings
+from app.tracking import load_unsubscribe_token
 from app import crud
 from app.routes import open_tracking
 from app.dev import router as dev_router
@@ -29,53 +31,21 @@ app = FastAPI()
 app.include_router(open_tracking.router)
 app.include_router(dev_router)
 
-# ────────────── Ensure DB tables exist on startup ──────────────
-#app.on_event("startup")
-# on_startup():
-#    init_db()
+# ────────────── API Key Auth ──────────────
+#
+# All endpoints require X-API-Key: <settings.API_KEY>.
+# Set API_KEY in .env. If API_KEY is empty (dev/test), auth is disabled.
+#
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-# ─── Scheduled-Email API for the UI ─────────────────────────────────────────────
-@app.get("/scheduled-emails")
-def list_scheduled(db: Session = Depends(get_session)):
-    sched = db.exec(select(ScheduledEmail)).all()
-    tmpl  = {t.id: t for t in db.exec(select(EmailTemplate)).all()}
-    pros  = {p.id: p for p in db.exec(select(Prospect)).all()}
-    out: List[dict] = []
-    for s in sched:
-        out.append({
-            "id":             s.id,
-            "prospect_id":    s.prospect_id,
-            "prospect_name":  pros.get(s.prospect_id).name if pros.get(s.prospect_id) else None,
-            "prospect_email": pros.get(s.prospect_id).email if pros.get(s.prospect_id) else None,
-            "template_name":  tmpl.get(s.template_id).name if tmpl.get(s.template_id) else None,
-            "send_at":        s.send_at,
-            "sent_at":        s.sent_at,
-            "status":         s.status,
-        })
-    return out
-
-@app.delete("/scheduled-emails/{sid}")
-def delete_schedule(sid: int, db: Session = Depends(get_session)):
-    obj = db.get(ScheduledEmail, sid)
-    if not obj:
-        raise HTTPException(status_code=404, detail="Not found")
-    db.delete(obj)
-    db.commit()
-    return {"message": "deleted"}
-
-@app.post("/scheduled-emails/{sid}/mark-sent")
-def mark_sent(sid: int, db: Session = Depends(get_session)):
-    obj = db.get(ScheduledEmail, sid)
-    if not obj:
-        raise HTTPException(status_code=404, detail="Not found")
-    obj.status  = "sent"
-    obj.sent_at = datetime.utcnow()
-    db.add(obj)
-    db.commit()
-    return {"message": "marked sent"}
+def require_api_key(api_key: str = Security(_api_key_header)):
+    if not settings.API_KEY:
+        return  # auth disabled when API_KEY is unset (dev/test only)
+    if api_key != settings.API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 # ────────────── Constants ──────────────
-CET        = pytz.timezone("Europe/Paris")
+CET        = pytz.timezone(settings.TIMEZONE)
 SEND_START = time(0, 0)
 SEND_END   = time(23, 59)
 LOG_PATH   = "error_log.txt"
@@ -93,7 +63,7 @@ async def _unhandled(request: Request, exc: Exception):
     elog.error("URL: %s METHOD: %s\n%r", request.url, request.method, exc)
     return JSONResponse(status_code=500, content={"detail": "Internal error"})
 
-@app.get("/error-log")
+@app.get("/error-log", dependencies=[Depends(require_api_key)])
 def get_error_log():
     if os.getenv("DEV_MODE", "false").lower() != "true":
         raise HTTPException(status_code=403, detail="Not allowed in production")
@@ -102,18 +72,16 @@ def get_error_log():
     with open(LOG_PATH) as f:
         return {"log": f.read()}
 
-@app.post("/clear-error-log")
+@app.post("/clear-error-log", dependencies=[Depends(require_api_key)])
 def clear_error_log():
     if os.getenv("DEV_MODE", "false").lower() != "true":
         raise HTTPException(status_code=403, detail="Not allowed in production")
-    open(LOG_PATH, "w").close()
+    with open(LOG_PATH, "w"):
+        pass
     return {"message": "Error log cleared"}
 
-@app.get("/cron-log")
+@app.get("/cron-log", dependencies=[Depends(require_api_key)])
 def cron_log():
-    """
-    Return the last 10 “Cron job fired” lines from the scheduler log.
-    """
     path = "logs/cron_invocations.log"
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Cron log file not found")
@@ -127,6 +95,10 @@ def _now() -> datetime:
 
 def _is_working(d: datetime) -> bool:
     return d.weekday() < 5
+
+def _name_lookup(db: Session, model) -> dict:
+    """Return {id: name} dict for any model with .id and .name fields."""
+    return {row.id: row.name for row in db.exec(select(model)).all()}
 
 def _scalar(db: Session, stmt) -> int:
     res = db.exec(stmt).one_or_none()
@@ -147,133 +119,185 @@ def _sent_today(db: Session) -> int:
     )
     return _scalar(db, stmt)
 
-count_sent_today = _sent_today
-
 # ────────────── Scheduler ──────────────
-def _send_pending() -> str:
-    with next(get_session()) as db:
-        now = _now()
+#
+# Status flow for ScheduledEmail:
+#   pending → sending (DB lock claimed)
+#             → sent   (SMTP success)
+#             → failed (SMTP failure)
+#
+# The "sending" lock prevents concurrent scheduler runs from
+# processing the same row (double-send protection).
+
+def _process_emails(db: Session, enforce_limits: bool = True) -> str:
+    """
+    Core send loop. Called by both /run-scheduler and /force-scheduler.
+
+    enforce_limits=True  → respect send window and daily cap (normal cron)
+    enforce_limits=False → ignore window and cap (force/manual send)
+
+    db is injected by FastAPI via Depends(get_session) so the test DB
+    override in conftest.py applies automatically.
+    """
+    now = _now()
+
+    if enforce_limits:
         if not (_is_working(now) and SEND_START <= now.time() <= SEND_END):
             return "outside window"
-
         sent_today = _sent_today(db)
         if sent_today >= settings.MAX_EMAILS_PER_DAY:
             return "daily limit reached"
+    else:
+        sent_today = 0
 
-        pending = db.exec(
-            select(ScheduledEmail).where(
-                ScheduledEmail.send_at <= now,
-                ScheduledEmail.sent_at.is_(None),
-                ScheduledEmail.status == "pending",
-            )
-        ).all()
+    # Claim pending rows atomically: pending → sending
+    # Any concurrent call will find 0 rows in this batch.
+    rows_to_claim = db.exec(
+        select(ScheduledEmail).where(
+            ScheduledEmail.send_at <= now,
+            ScheduledEmail.status == "pending",
+            ScheduledEmail.sent_at.is_(None),
+        )
+    ).all()
 
-        processed = 0
-        for sched in pending:
-            if sent_today >= settings.MAX_EMAILS_PER_DAY:
-                break
+    if not rows_to_claim:
+        return "processed 0"
 
-            prospect = db.get(Prospect, sched.prospect_id)
-            template = db.get(EmailTemplate, sched.template_id)
-            if not (prospect and template):
-                continue
+    claimed_ids = [r.id for r in rows_to_claim]
+    db.exec(
+        update(ScheduledEmail)
+        .where(ScheduledEmail.id.in_(claimed_ids))
+        .values(status="sending")
+    )
+    db.commit()
 
-            seq = db.get(Sequence, sched.sequence_id) if sched.sequence_id else None
-            bcc = getattr(seq, "bcc_email", None) or None
+    # Re-fetch the claimed rows (status is now "sending")
+    pending = db.exec(
+        select(ScheduledEmail).where(ScheduledEmail.id.in_(claimed_ids))
+    ).all()
 
-            ctx = {
-                "name":    prospect.name,
-                "email":   prospect.email,
-                "company": prospect.company or "",
-                "title":   prospect.title or "",
-            }
+    processed = 0
+    for sched in pending:
+        if enforce_limits and sent_today >= settings.MAX_EMAILS_PER_DAY:
+            sched.status = "pending"
+            db.add(sched)
+            continue
 
-            ok = send_email(
-                to_email=prospect.email,
-                subject=template.subject,
-                body=template.body,
-                bcc_email=bcc,
-                context=ctx,
-            )
+        prospect = db.get(Prospect, sched.prospect_id)
+        template = db.get(EmailTemplate, sched.template_id)
 
-            sched.sent_at = datetime.utcnow()
-            sched.status  = "sent" if ok else "failed"
+        if not (prospect and template):
+            sched.status = "failed"
+            db.add(sched)
+            continue
 
-            db.add(SentEmail(
-                to=prospect.email,
-                subject=template.subject,
-                body=template.body,
-                sent_at=sched.sent_at,
-                status=sched.status,
-                prospect_id=prospect.id,
-                template_id=template.id,
-                sequence_id=sched.sequence_id,
-            ))
-            processed += int(ok)
-            sent_today += int(ok)
+        if prospect.unsubscribed:
+            sched.status = "failed"
+            db.add(sched)
+            continue
 
-        db.commit()
-        return f"processed {processed}"
+        seq = db.get(Sequence, sched.sequence_id) if sched.sequence_id else None
+        bcc = getattr(seq, "bcc_email", None)
+        ctx = {
+            "name":    prospect.name,
+            "email":   prospect.email,
+            "company": prospect.company or "",
+            "title":   prospect.title or "",
+        }
 
-@app.post("/run-scheduler")
-def run_scheduler_api():
-    return {"message": _send_pending()}
+        # Pre-insert SentEmail to get an ID for the tracking pixel.
+        sent_ts = datetime.utcnow()
+        sent_record = SentEmail(
+            to=prospect.email,
+            subject=template.subject,
+            body=template.body,
+            sent_at=sent_ts,
+            status="sending",
+            prospect_id=prospect.id,
+            template_id=template.id,
+            sequence_id=sched.sequence_id,
+        )
+        db.add(sent_record)
+        db.flush()  # assigns sent_record.id without committing
 
-@app.post("/force-scheduler")
-def force_scheduler():
-    with next(get_session()) as db:
-        now = datetime.utcnow()
-        pending = db.exec(
-            select(ScheduledEmail).where(
-                ScheduledEmail.sent_at.is_(None),
-                ScheduledEmail.status == "pending",
-                ScheduledEmail.send_at <= now,
-            )
-        ).all()
+        ok = send_email(
+            to_email=prospect.email,
+            subject=template.subject,
+            body=template.body,
+            bcc_email=bcc,
+            context=ctx,
+            email_id=sent_record.id,
+        )
 
-        processed = 0
-        for sched in pending:
-            prospect = db.get(Prospect, sched.prospect_id)
-            template = db.get(EmailTemplate, sched.template_id)
-            if not (prospect and template):
-                continue
+        final_status = "sent" if ok else "failed"
+        sent_record.status = final_status
+        sched.sent_at = sent_ts
+        sched.status  = final_status
 
-            sequence = db.get(Sequence, prospect.sequence_id) if prospect.sequence_id else None
-            bcc = getattr(sequence, "bcc_email", None) or getattr(settings, "DEFAULT_BCC_EMAIL", "")
+        db.add(sched)
+        db.add(sent_record)
 
-            ok = send_email(
-                to_email=prospect.email,
-                subject=template.subject,
-                body=template.body,
-                bcc_email=bcc,
-                context={
-                    "name":    prospect.name,
-                    "email":   prospect.email,
-                    "company": prospect.company or "",
-                    "title":   prospect.title or "",
-                },
-            )
+        if ok:
+            processed += 1
+            sent_today += 1
 
-            sched.sent_at = datetime.utcnow()
-            sched.status  = "sent" if ok else "failed"
+    db.commit()
+    return f"processed {processed}"
 
-            db.add(SentEmail(
-                to=prospect.email,
-                subject=template.subject,
-                body=template.body,
-                sent_at=sched.sent_at,
-                status=sched.status,
-                prospect_id=prospect.id,
-                template_id=template.id,
-                sequence_id=prospect.sequence_id,
-            ))
-            processed += int(ok)
 
-        db.commit()
-        return {"message": f"FORCE scheduler sent {processed} overdue emails"}
+@app.post("/run-scheduler", dependencies=[Depends(require_api_key)])
+def run_scheduler_api(db: Session = Depends(get_session)):
+    return {"message": _process_emails(db, enforce_limits=True)}
+
+
+@app.post("/force-scheduler", dependencies=[Depends(require_api_key)])
+def force_scheduler(db: Session = Depends(get_session)):
+    result = _process_emails(db, enforce_limits=False)
+    return {"message": f"FORCE scheduler: {result}"}
+
+
+# ────────────── Scheduled-Email API for the UI ──────────────
+@app.get("/scheduled-emails", dependencies=[Depends(require_api_key)])
+def list_scheduled(db: Session = Depends(get_session)):
+    sched = db.exec(select(ScheduledEmail)).all()
+    tmpl  = {t.id: t for t in db.exec(select(EmailTemplate)).all()}
+    pros  = {p.id: p for p in db.exec(select(Prospect)).all()}
+    return [
+        {
+            "id":             s.id,
+            "prospect_id":    s.prospect_id,
+            "prospect_name":  pros[s.prospect_id].name if s.prospect_id in pros else None,
+            "prospect_email": pros[s.prospect_id].email if s.prospect_id in pros else None,
+            "template_name":  tmpl[s.template_id].name if s.template_id in tmpl else None,
+            "send_at":        s.send_at,
+            "sent_at":        s.sent_at,
+            "status":         s.status,
+        }
+        for s in sched
+    ]
+
+@app.delete("/scheduled-emails/{sid}", dependencies=[Depends(require_api_key)])
+def delete_schedule(sid: int, db: Session = Depends(get_session)):
+    obj = db.get(ScheduledEmail, sid)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.delete(obj)
+    db.commit()
+    return {"message": "deleted"}
+
+@app.post("/scheduled-emails/{sid}/mark-sent", dependencies=[Depends(require_api_key)])
+def mark_sent(sid: int, db: Session = Depends(get_session)):
+    obj = db.get(ScheduledEmail, sid)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Not found")
+    obj.status  = "sent"
+    obj.sent_at = _now()
+    db.add(obj)
+    db.commit()
+    return {"message": "marked sent"}
 
 # ────────────── Prospects CRUD/List ──────────────
-@app.get("/prospects")
+@app.get("/prospects", dependencies=[Depends(require_api_key)])
 def list_prospects(
     assigned: Optional[str] = None,
     db: Session = Depends(get_session),
@@ -288,18 +312,22 @@ def list_prospects(
         q = q.where(Prospect.sequence_id.is_(None))
     prospects = db.exec(q).all()
 
-    steps_per_seq = {
-        seq.id: _scalar(
-            db,
-            select(func.count()).select_from(SequenceStep)
-            .where(SequenceStep.sequence_id == seq.id)
-        )
-        for seq in db.exec(select(Sequence)).all()
-    }
+    # Single GROUP BY query replaces per-sequence COUNT loop (fixes N+1)
+    step_counts = db.exec(
+        select(SequenceStep.sequence_id, func.count(SequenceStep.id))
+        .group_by(SequenceStep.sequence_id)
+    ).all()
+    steps_per_seq = {seq_id: cnt for seq_id, cnt in step_counts}
 
-    sched_map = {}
-    for s in db.exec(select(ScheduledEmail)).all():
-        sched_map.setdefault(s.prospect_id, []).append(s)
+    prospect_ids = [p.id for p in prospects]
+    sched_map: dict = {}
+    if prospect_ids:
+        for s in db.exec(
+            select(ScheduledEmail).where(ScheduledEmail.prospect_id.in_(prospect_ids))
+        ).all():
+            sched_map.setdefault(s.prospect_id, []).append(s)
+
+    seq_names = {s.id: s.name for s in db.exec(select(Sequence)).all()}
 
     out = []
     for p in prospects:
@@ -307,44 +335,44 @@ def list_prospects(
         done  = sum(1 for s in sched_map.get(p.id, []) if s.status in {"sent", "failed"})
         out.append({
             **p.dict(),
-            "sequence_name":        db.get(Sequence, p.sequence_id).name if p.sequence_id else None,
-            "sequence_steps_total": total,
+            "sequence_name":         seq_names.get(p.sequence_id),
+            "sequence_steps_total":  total,
             "sequence_step_current": done,
             "sequence_progress_pct": int(100 * done / total) if total else 0,
         })
     return out
 
-@app.post("/prospects")
+@app.post("/prospects", dependencies=[Depends(require_api_key)])
 def add_prospect(p: Prospect, db: Session = Depends(get_session)):
-    return crud.create_prospect(db, p)
+    try:
+        return crud.create_prospect(db, p)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A prospect with this email already exists")
 
-@app.put("/prospects/{pid}")
+@app.put("/prospects/{pid}", dependencies=[Depends(require_api_key)])
 def edit_prospect(pid: int, data: Prospect, db: Session = Depends(get_session)):
     obj = db.get(Prospect, pid)
     if not obj:
         raise HTTPException(status_code=404, detail="Prospect not found")
-
     updates = data.dict(exclude_unset=True)
-    # If user cleared sequence_id, purge any pending scheduled emails for that prospect
     if "sequence_id" in updates and updates["sequence_id"] is None:
         db.exec(delete(ScheduledEmail).where(ScheduledEmail.prospect_id == pid))
-
     for k, v in updates.items():
         setattr(obj, k, v)
-
     db.add(obj)
     db.commit()
     db.refresh(obj)
     return obj
 
-@app.delete("/prospects/{pid}")
+@app.delete("/prospects/{pid}", dependencies=[Depends(require_api_key)])
 def delete_prospect(pid: int, db: Session = Depends(get_session)):
     if not crud.delete_prospect(db, pid):
         raise HTTPException(status_code=404, detail="Prospect not found")
     return {"message": "deleted"}
 
 # ────────────── Assign Sequence / Bulk Scheduling ──────────────
-@app.post("/assign-sequence")
+@app.post("/assign-sequence", dependencies=[Depends(require_api_key)])
 def assign_sequence(payload: AssignSequenceRequest, db: Session = Depends(get_session)):
     start = date.today()
     if payload.start_date:
@@ -357,86 +385,84 @@ def assign_sequence(payload: AssignSequenceRequest, db: Session = Depends(get_se
     return {"message": "sequence assigned"}
 
 # ────────────── Sequence CRUD & Steps ──────────────
-@app.get("/sequences", response_model=List[SequenceRead])
+@app.get("/sequences", response_model=List[SequenceRead], dependencies=[Depends(require_api_key)])
 def list_sequences(db: Session = Depends(get_session)):
     return db.exec(select(Sequence)).all()
 
-@app.post("/sequences", response_model=SequenceRead)
+@app.post("/sequences", response_model=SequenceRead, dependencies=[Depends(require_api_key)])
 def create_sequence(data: SequenceCreate, db: Session = Depends(get_session)):
-    obj = Sequence(**data.dict()); db.add(obj); db.commit(); db.refresh(obj); return obj
+    obj = Sequence(**data.dict())
+    db.add(obj); db.commit(); db.refresh(obj)
+    return obj
 
-@app.patch("/sequences/{sid}", response_model=SequenceRead)
+@app.patch("/sequences/{sid}", response_model=SequenceRead, dependencies=[Depends(require_api_key)])
 def update_sequence(sid: int, data: SequenceCreate, db: Session = Depends(get_session)):
     obj = db.get(Sequence, sid)
     if not obj:
         raise HTTPException(status_code=404, detail="Sequence not found")
     for k, v in data.dict(exclude_unset=True).items():
         setattr(obj, k, v)
-    db.add(obj); db.commit(); db.refresh(obj); return obj
+    db.add(obj); db.commit(); db.refresh(obj)
+    return obj
 
-@app.delete("/sequences/{sid}")
+@app.delete("/sequences/{sid}", dependencies=[Depends(require_api_key)])
 def delete_sequence(sid: int, db: Session = Depends(get_session)):
     obj = db.get(Sequence, sid)
     if not obj:
         raise HTTPException(status_code=404, detail="Sequence not found")
-    # purge its steps and any pending scheduled emails
     db.exec(delete(SequenceStep).where(SequenceStep.sequence_id == sid))
     db.exec(delete(ScheduledEmail).where(ScheduledEmail.sequence_id == sid))
     db.delete(obj); db.commit()
     return {"message": "deleted"}
 
-@app.get("/sequences/{sid}/steps")
+@app.get("/sequences/{sid}/steps", dependencies=[Depends(require_api_key)])
 def list_steps(sid: int, db: Session = Depends(get_session)):
     return crud.get_sequence_steps(db, sid)
 
-@app.post("/sequences/{sid}/steps")
+@app.post("/sequences/{sid}/steps", dependencies=[Depends(require_api_key)])
 def add_step(sid: int, step: SequenceStep, db: Session = Depends(get_session)):
     if not db.get(Sequence, sid):
-        raise HTTPException(status_code=400, detail="Sequence not exist")
+        raise HTTPException(status_code=400, detail="Sequence not found")
     if not db.get(EmailTemplate, step.template_id):
-        raise HTTPException(status_code=400, detail="Template not exist")
+        raise HTTPException(status_code=400, detail="Template not found")
     step.sequence_id = sid
     return crud.create_sequence_step(db, step)
 
-@app.patch("/sequences/steps/{step_id}")
+@app.patch("/sequences/steps/{step_id}", dependencies=[Depends(require_api_key)])
 def edit_step(step_id: int, data: SequenceStep, db: Session = Depends(get_session)):
     res = crud.update_sequence_step(db, step_id, data)
     if res is None:
         raise HTTPException(status_code=404, detail="Step not found")
     return res
 
-@app.delete("/sequences/steps/{step_id}")
+@app.delete("/sequences/steps/{step_id}", dependencies=[Depends(require_api_key)])
 def delete_step(step_id: int, db: Session = Depends(get_session)):
     if not crud.delete_sequence_step(db, step_id):
         raise HTTPException(status_code=404, detail="Step not found")
     return {"message": "deleted"}
 
 # ────────────── Templates CRUD ──────────────
-@app.get("/templates")
+@app.get("/templates", dependencies=[Depends(require_api_key)])
 def list_templates(db: Session = Depends(get_session)):
     return crud.get_templates(db)
 
-@app.post("/templates")
+@app.post("/templates", dependencies=[Depends(require_api_key)])
 def create_template(t: EmailTemplate, db: Session = Depends(get_session)):
     return crud.create_template(db, t)
 
-@app.patch("/templates/{tid}")
+@app.patch("/templates/{tid}", dependencies=[Depends(require_api_key)])
 def update_template(tid: int, data: EmailTemplate, db: Session = Depends(get_session)):
     tpl = db.get(EmailTemplate, tid)
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    for k, v in data.dict(exclude_unset=True).items():
-        setattr(tpl, k, v)
     return crud.update_template(db, tid, data)
 
-@app.delete("/templates/{tid}")
+@app.delete("/templates/{tid}", dependencies=[Depends(require_api_key)])
 def delete_template(tid: int, db: Session = Depends(get_session)):
-    # purge any pending scheduled emails for this template
     db.exec(delete(ScheduledEmail).where(
         ScheduledEmail.template_id == tid,
         ScheduledEmail.sent_at.is_(None)
     ))
-    # delegate to CRUD (prevents deletion if used in a sequence step)
     res = crud.delete_template(db, tid)
     if res is None:
         raise HTTPException(status_code=400, detail="Template used in a sequence step")
@@ -445,29 +471,29 @@ def delete_template(tid: int, db: Session = Depends(get_session)):
     return {"message": "deleted"}
 
 # ────────────── Sent Emails & Analytics ──────────────
-@app.get("/sent-emails")
+@app.get("/sent-emails", dependencies=[Depends(require_api_key)])
 def list_sent(db: Session = Depends(get_session)):
-    sent = db.exec(select(SentEmail).order_by(SentEmail.sent_at.desc())).all()
-    tnames = {t.id: t.name for t in db.exec(select(EmailTemplate)).all()}
-    snames = {s.id: s.name for s in db.exec(select(Sequence)).all()}
-    enriched = []
-    for e in sent:
-        enriched.append({
-            **e.dict(),
-            "template_name": tnames.get(e.template_id),
-            "sequence_name": snames.get(e.sequence_id),
-        })
-    return enriched
+    sent   = db.exec(select(SentEmail).order_by(SentEmail.sent_at.desc())).all()
+    tnames = _name_lookup(db, EmailTemplate)
+    snames = _name_lookup(db, Sequence)
+    return [
+        {**e.dict(), "template_name": tnames.get(e.template_id), "sequence_name": snames.get(e.sequence_id)}
+        for e in sent
+    ]
 
-@app.get("/analytics/summary")
+@app.get("/analytics/summary", dependencies=[Depends(require_api_key)])
 def analytics(db: Session = Depends(get_session)):
-    all_sent = db.exec(select(SentEmail)).all()
-    failed   = sum(1 for e in all_sent if e.status == "failed")
-    opened   = sum(1 for e in all_sent if e.status == "opened")
+    # COUNT queries — no full table scan
+    total  = _scalar(db, select(func.count()).select_from(SentEmail))
+    failed = _scalar(db, select(func.count()).select_from(SentEmail).where(SentEmail.status == "failed"))
+    opened = _scalar(db, select(func.count()).select_from(SentEmail).where(SentEmail.status == "opened"))
+    recent = db.exec(select(SentEmail).order_by(SentEmail.sent_at.desc()).limit(10)).all()
+    tnames = _name_lookup(db, EmailTemplate)
+    snames = _name_lookup(db, Sequence)
     return {
-        "total_sent":   len(all_sent),
+        "total_sent":   total,
         "total_failed": failed,
-        "open_rate":    round(opened / len(all_sent) * 100, 2) if all_sent else 0,
+        "open_rate":    round(opened / total * 100, 2) if total else 0,
         "sent_today":   _sent_today(db),
         "recent": [
             {
@@ -475,39 +501,31 @@ def analytics(db: Session = Depends(get_session)):
                 "subject":       e.subject,
                 "status":        e.status,
                 "sent_at":       e.sent_at,
-                "template_name": getattr(e, 'template_name', None),
-                "sequence_name": getattr(e, 'sequence_name', None),
+                "template_name": tnames.get(e.template_id),
+                "sequence_name": snames.get(e.sequence_id),
             }
-            for e in all_sent[:10]
-        ]
+            for e in recent
+        ],
     }
 
-@app.post("/send-test")
+@app.post("/send-test", dependencies=[Depends(require_api_key)])
 def send_test_email(data: TestEmailRequest):
-    context = {
-        "name":    "Test Name",
-        "title":   "Test Title",
-        "company": "Test Company",
-        "email":   data.email,
-    }
     ok = send_email(
         to_email=data.email,
         subject=data.subject,
         body=data.body,
-        bcc_email=getattr(settings, "DEFAULT_BCC_EMAIL", ""),
-        context=context,
+        context={"name": "Test Name", "title": "Test Title", "company": "Test Company", "email": data.email},
     )
     if not ok:
         raise HTTPException(status_code=500, detail="SMTP failed")
     return {"message": "sent"}
 
-@app.get("/prospects/{pid}/timeline")
+@app.get("/prospects/{pid}/timeline", dependencies=[Depends(require_api_key)])
 def timeline(pid: int, db: Session = Depends(get_session)):
     prospect = db.get(Prospect, pid)
     if not prospect:
         raise HTTPException(status_code=404, detail="Prospect not found")
     sched = db.exec(select(ScheduledEmail).where(ScheduledEmail.prospect_id == pid)).all()
-    tmpl  = {t.id: t for t in db.exec(select(EmailTemplate)).all()}
 
     if prospect.sequence_id:
         steps = db.exec(
@@ -515,26 +533,34 @@ def timeline(pid: int, db: Session = Depends(get_session)):
             .where(SequenceStep.sequence_id == prospect.sequence_id)
             .order_by(SequenceStep.delay_days)
         ).all()
+        step_tids = {s.template_id for s in steps}
+        tmpl = {t.id: t for t in db.exec(
+            select(EmailTemplate).where(EmailTemplate.id.in_(step_tids))
+        ).all()}
         tl = []
         for idx, step in enumerate(steps, 1):
             match = next((s for s in sched if s.template_id == step.template_id), None)
             et = tmpl.get(step.template_id)
             tl.append({
-                "step_number":     idx,
-                "template_name":   et.name if et else "-",
-                "subject":         et.subject if et else "",
-                "scheduled_at":    getattr(match, "send_at", None),
-                "sent_at":         getattr(match, "sent_at", None),
-                "status":          getattr(match, "status", "-") if match else "-",
-                "opened_at":       getattr(match, "opened_at", None) if match else None,
+                "step_number":   idx,
+                "template_name": et.name if et else "-",
+                "subject":       et.subject if et else "",
+                "scheduled_at":  getattr(match, "send_at", None),
+                "sent_at":       getattr(match, "sent_at", None),
+                "status":        getattr(match, "status", "-") if match else "-",
+                "opened_at":     getattr(match, "opened_at", None) if match else None,
             })
         return tl
 
+    sched_tids = {s.template_id for s in sched}
+    tmpl = {t.id: t for t in db.exec(
+        select(EmailTemplate).where(EmailTemplate.id.in_(sched_tids))
+    ).all()}
     return sorted([
         {
             "step_number":   None,
-            "template_name": tmpl.get(s.template_id).name if tmpl.get(s.template_id) else "-",
-            "subject":       tmpl.get(s.template_id).subject if tmpl.get(s.template_id) else "",
+            "template_name": tmpl[s.template_id].name if s.template_id in tmpl else "-",
+            "subject":       tmpl[s.template_id].subject if s.template_id in tmpl else "",
             "scheduled_at":  s.send_at,
             "sent_at":       s.sent_at,
             "status":        s.status,
@@ -543,21 +569,33 @@ def timeline(pid: int, db: Session = Depends(get_session)):
         for s in sched
     ], key=lambda x: x["scheduled_at"] or datetime.min)
 
+
 @app.get("/unsubscribe")
 def unsubscribe(token: str, db: Session = Depends(get_session)):
-    from app.tracking import serializer
-    try:
-        email    = serializer.loads(token)
-        prospect = db.exec(select(Prospect).where(Prospect.email == email)).first()
-        if prospect:
-            prospect.unsubscribed = True
-            db.add(prospect)
-            db.commit()
-        return HTMLResponse("<h3>You’ve been unsubscribed.</h3>")
-    except:
-        return HTMLResponse("<h3>Invalid or expired link.</h3>", status_code=400)
+    """Unsubscribe endpoint — no API key required (linked from emails)."""
+    from sqlalchemy import delete as sa_delete
 
-@app.post("/reset-all", status_code=status.HTTP_200_OK)
+    email = load_unsubscribe_token(token)
+    if not email:
+        return HTMLResponse("<h3>Invalid or expired unsubscribe link.</h3>", status_code=400)
+
+    prospect = db.exec(select(Prospect).where(Prospect.email == email)).first()
+    if prospect:
+        prospect.unsubscribed = True
+        db.add(prospect)
+        # Purge pending emails so the scheduler never sends them
+        db.exec(
+            sa_delete(ScheduledEmail).where(
+                ScheduledEmail.prospect_id == prospect.id,
+                ScheduledEmail.status == "pending",
+            )
+        )
+        db.commit()
+
+    return HTMLResponse("<h3>You've been unsubscribed.</h3>")
+
+
+@app.post("/reset-all", status_code=status.HTTP_200_OK, dependencies=[Depends(require_api_key)])
 def reset_all(db: Session = Depends(get_session)):
     if os.getenv("DEV_MODE", "false").lower() != "true":
         raise HTTPException(status_code=403, detail="Not allowed in production")
@@ -566,8 +604,8 @@ def reset_all(db: Session = Depends(get_session)):
         db.commit()
     return {"message": "all data deleted"}
 
+
 # ────────────── CLI Entrypoint ──────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
-

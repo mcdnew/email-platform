@@ -3,9 +3,9 @@ services:
     image: postgres:15
     restart: always
     environment:
-      POSTGRES_USER:     email_user
-      POSTGRES_PASSWORD: strongpassword
-      POSTGRES_DB:       email_platform
+      POSTGRES_USER:     ${POSTGRES_USER:-email_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB:-email_platform}
     volumes:
       - db_data:/var/lib/postgresql/data
 
@@ -21,10 +21,8 @@ services:
     env_file:
       - .env
     environment:
-      # point at the "db" service instead of localhost
-      DATABASE_URL: "postgresql://email_user:strongpassword@db:5432/email_platform"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-email_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-email_platform}"
     volumes:
-      # so your cron and error logs persist on the host
       - ./logs:/app/logs
 
   frontend:
@@ -45,8 +43,7 @@ volumes:
   db_data:
 
 
-## usage: 
+## usage:
 # docker compose down
 # docker compose build
 # docker compose up -d
-
