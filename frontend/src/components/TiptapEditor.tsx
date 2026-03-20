@@ -50,6 +50,7 @@ export function TiptapEditor({ value, onChange, placeholder }: Props) {
   const varRef = useRef<HTMLDivElement>(null)
 
   const editor = useEditor({
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Underline,
