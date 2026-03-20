@@ -40,8 +40,8 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Chart */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <h2 className="text-sm font-medium text-gray-700 mb-4">Email Status Overview</h2>
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+          <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">Email Status Overview</h2>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={chartData}>
               <XAxis dataKey="name" tick={{ fontSize: 12 }} />
@@ -53,14 +53,14 @@ export default function DashboardPage() {
         </div>
 
         {/* Recent activity */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <h2 className="text-sm font-medium text-gray-700 mb-3">Recent Emails</h2>
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+          <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Recent Emails</h2>
           <div className="space-y-2">
             {data.recent.length === 0 && <p className="text-sm text-gray-400">No emails sent yet.</p>}
             {data.recent.map((e, i) => (
               <div key={i} className="flex items-center justify-between text-xs">
                 <div className="truncate flex-1 mr-2">
-                  <span className="font-medium text-gray-900">{e.to}</span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{e.to}</span>
                   <span className="text-gray-400 ml-1">— {e.subject}</span>
                 </div>
                 <StatusBadge status={e.status} />
@@ -77,10 +77,10 @@ function StatCard({ icon: Icon, label, value, color }: {
   icon: React.ElementType; label: string; value: string | number; color: string
 }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-start gap-3">
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-start gap-3">
       <Icon className={`w-4 h-4 mt-1 flex-shrink-0 ${STAT_COLORS[color]}`} />
       <div>
-        <div className="text-2xl font-bold text-gray-900">{value}</div>
+        <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{value}</div>
         <div className="text-xs text-gray-500 mt-0.5">{label}</div>
       </div>
     </div>
@@ -90,7 +90,7 @@ function StatCard({ icon: Icon, label, value, color }: {
 function PageShell({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="p-6">
-      <h1 className="text-xl font-semibold text-gray-900 mb-5">{title}</h1>
+      <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-5">{title}</h1>
       {children}
     </div>
   )

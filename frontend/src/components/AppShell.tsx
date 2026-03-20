@@ -3,9 +3,10 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { useTheme } from 'next-themes'
 import {
   LayoutDashboard, Users, FileText, GitBranch,
-  Clock, Mail, Settings, LogOut, Send, Menu, X,
+  Clock, Mail, Settings, LogOut, Send, Menu, X, Sun, Moon,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -24,12 +25,13 @@ function NavContent({ pathname, onNavigate, onLogout }: {
   onNavigate?: () => void
   onLogout: () => void
 }) {
+  const { theme, setTheme } = useTheme()
   return (
     <>
-      <div className="px-4 py-5 border-b border-gray-200">
+      <div className="px-4 py-5 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-2">
           <Send className="w-5 h-5 text-blue-600" />
-          <span className="font-semibold text-gray-900 text-sm">Email Platform</span>
+          <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Email Platform</span>
         </div>
       </div>
       <nav className="flex-1 px-2 py-3 space-y-0.5">
@@ -41,8 +43,8 @@ function NavContent({ pathname, onNavigate, onLogout }: {
             className={clsx(
               'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
               pathname === href
-                ? 'bg-blue-50 text-blue-700'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100'
             )}
           >
             <Icon className="w-4 h-4 flex-shrink-0" />
@@ -50,10 +52,17 @@ function NavContent({ pathname, onNavigate, onLogout }: {
           </Link>
         ))}
       </nav>
-      <div className="p-2 border-t border-gray-200">
+      <div className="p-2 border-t border-gray-200 dark:border-gray-700 space-y-0.5">
+        <button
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          className="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+        >
+          {theme === 'dark' ? <Sun className="w-4 h-4 flex-shrink-0" /> : <Moon className="w-4 h-4 flex-shrink-0" />}
+          {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+        </button>
         <button
           onClick={onLogout}
-          className="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+          className="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
         >
           <LogOut className="w-4 h-4 flex-shrink-0" />
           Sign out
@@ -74,9 +83,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-gray-50 dark:bg-gray-950">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-56 flex-shrink-0 bg-white border-r border-gray-200 flex-col">
+      <aside className="hidden md:flex w-56 flex-shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex-col">
         <NavContent pathname={pathname} onLogout={logout} />
       </aside>
 
@@ -90,7 +99,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Mobile drawer */}
       <aside className={clsx(
-        'fixed top-0 left-0 h-full w-64 bg-white z-50 flex flex-col transition-transform duration-200 md:hidden',
+        'fixed top-0 left-0 h-full w-64 bg-white dark:bg-gray-900 z-50 flex flex-col transition-transform duration-200 md:hidden',
         mobileOpen ? 'translate-x-0' : '-translate-x-full'
       )}>
         <div className="absolute top-3 right-3">
@@ -104,7 +113,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Mobile header */}
-        <header className="md:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200">
+        <header className="md:hidden flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
           <button onClick={() => setMobileOpen(true)} className="p-1.5 rounded-lg hover:bg-gray-100">
             <Menu className="w-5 h-5 text-gray-600" />
           </button>

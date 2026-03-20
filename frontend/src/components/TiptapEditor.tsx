@@ -36,8 +36,8 @@ function ToolbarBtn({
       onClick={onClick}
       className={`p-1 rounded transition-colors ${
         active
-          ? 'bg-blue-100 text-blue-700'
-          : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
+          ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+          : 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700'
       } disabled:opacity-30`}
     >
       {children}
@@ -61,7 +61,7 @@ export function TiptapEditor({ value, onChange, placeholder }: Props) {
       onChange(editor.getHTML())
     },
     editorProps: {
-      attributes: { class: 'tiptap-editor focus:outline-none min-h-[160px] px-3 py-2 text-sm text-gray-800' },
+      attributes: { class: 'tiptap-editor focus:outline-none min-h-[160px] px-3 py-2 text-sm text-gray-800 dark:text-gray-200' },
     },
   })
 
@@ -105,9 +105,9 @@ export function TiptapEditor({ value, onChange, placeholder }: Props) {
   if (!editor) return null
 
   return (
-    <div className="border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent">
+    <div className="border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent dark:bg-gray-800">
       {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1 border-b border-gray-200 bg-gray-50 flex-wrap">
+      <div className="flex items-center gap-0.5 px-2 py-1 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-wrap">
         <ToolbarBtn
           title="Bold" active={editor.isActive('bold')}
           onClick={() => editor.chain().focus().toggleBold().run()}
@@ -127,7 +127,7 @@ export function TiptapEditor({ value, onChange, placeholder }: Props) {
           <UnderlineIcon className="w-3.5 h-3.5" />
         </ToolbarBtn>
 
-        <div className="w-px h-4 bg-gray-200 mx-1" />
+        <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1" />
 
         <ToolbarBtn
           title="Heading 2" active={editor.isActive('heading', { level: 2 })}
@@ -142,7 +142,7 @@ export function TiptapEditor({ value, onChange, placeholder }: Props) {
           <Heading3 className="w-3.5 h-3.5" />
         </ToolbarBtn>
 
-        <div className="w-px h-4 bg-gray-200 mx-1" />
+        <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1" />
 
         <ToolbarBtn
           title="Bullet list" active={editor.isActive('bulletList')}
@@ -157,7 +157,7 @@ export function TiptapEditor({ value, onChange, placeholder }: Props) {
           <ListOrdered className="w-3.5 h-3.5" />
         </ToolbarBtn>
 
-        <div className="w-px h-4 bg-gray-200 mx-1" />
+        <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1" />
 
         <ToolbarBtn
           title="Link" active={editor.isActive('link')}
@@ -166,7 +166,7 @@ export function TiptapEditor({ value, onChange, placeholder }: Props) {
           <LinkIcon className="w-3.5 h-3.5" />
         </ToolbarBtn>
 
-        <div className="w-px h-4 bg-gray-200 mx-1" />
+        <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1" />
 
         {/* Variable insertion */}
         <div className="relative" ref={varRef}>
@@ -174,19 +174,19 @@ export function TiptapEditor({ value, onChange, placeholder }: Props) {
             type="button"
             title="Insert variable"
             onClick={() => setShowVarMenu(v => !v)}
-            className="flex items-center gap-1 px-1.5 py-1 text-xs font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+            className="flex items-center gap-1 px-1.5 py-1 text-xs font-medium text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
           >
             <Braces className="w-3.5 h-3.5" />
             <span>Insert variable</span>
           </button>
           {showVarMenu && (
-            <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-md py-1 min-w-[130px]">
+            <div className="absolute left-0 top-full mt-1 z-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-md py-1 min-w-[130px]">
               {VARIABLES.map(v => (
                 <button
                   key={v}
                   type="button"
                   onClick={() => insertVariable(v)}
-                  className="block w-full text-left px-3 py-1.5 text-xs font-mono text-gray-700 hover:bg-blue-50 hover:text-blue-700"
+                  className="block w-full text-left px-3 py-1.5 text-xs font-mono text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-700 dark:hover:text-blue-400"
                 >
                   {`{{${v}}}`}
                 </button>

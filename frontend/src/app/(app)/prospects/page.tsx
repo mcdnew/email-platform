@@ -128,7 +128,7 @@ export default function ProspectsPage() {
         return v ? (
           <div>
             <div className="text-xs font-medium">{v}</div>
-            <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
+            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1 mt-1">
               <div className="bg-blue-500 h-1 rounded-full" style={{ width: `${pct}%` }} />
             </div>
           </div>
@@ -162,7 +162,7 @@ export default function ProspectsPage() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
-        <h1 className="text-xl font-semibold text-gray-900">Prospects</h1>
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Prospects</h1>
         <div className="flex items-center gap-2">
           {selectedIds.length > 0 && (
             <button onClick={() => setAssignModal(selectedIds)}
@@ -171,7 +171,7 @@ export default function ProspectsPage() {
               Assign sequence ({selectedIds.length})
             </button>
           )}
-          <label className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 rounded-lg cursor-pointer transition-colors">
+          <label className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer transition-colors">
             <Upload className="w-3.5 h-3.5" />
             Import CSV
             <input type="file" accept=".csv" className="hidden" onChange={handleCSV} suppressHydrationWarning />
@@ -198,13 +198,13 @@ export default function ProspectsPage() {
           placeholder="Search name, email, company…"
           value={search}
           onChange={e => handleSearch(e.target.value)}
-          className="w-80 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-80 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-500"
         />
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-200">
+          <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
             {table.getHeaderGroups().map(hg => (
               <tr key={hg.id}>
                 {hg.headers.map(header => {
@@ -212,7 +212,7 @@ export default function ProspectsPage() {
                   return (
                     <th key={header.id}
                       onClick={sortable ? () => handleSort(header.id) : undefined}
-                      className={`px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide ${sortable ? 'cursor-pointer hover:text-gray-900 select-none' : ''}`}>
+                      className={`px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide ${sortable ? 'cursor-pointer hover:text-gray-900 dark:hover:text-gray-100 select-none' : ''}`}>
                       <div className="flex items-center gap-1">
                         {flexRender(header.column.columnDef.header, header.getContext())}
                         {sortable && sortBy === header.id && (
@@ -225,7 +225,7 @@ export default function ProspectsPage() {
               </tr>
             ))}
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
             {isLoading ? (
               <tr><td colSpan={7} className="px-3 py-8 text-center text-gray-400 text-sm">Loading…</td></tr>
             ) : table.getRowModel().rows.length === 0 ? (
@@ -234,9 +234,9 @@ export default function ProspectsPage() {
                 <p className="text-gray-400 text-xs mt-1">Import a CSV or add your first prospect above.</p>
               </td></tr>
             ) : table.getRowModel().rows.map(row => (
-              <tr key={row.id} className="hover:bg-gray-50">
+              <tr key={row.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                 {row.getVisibleCells().map(cell => (
-                  <td key={cell.id} className="px-3 py-2.5 text-gray-700">
+                  <td key={cell.id} className="px-3 py-2.5 text-gray-700 dark:text-gray-300">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
                 ))}
@@ -292,13 +292,13 @@ function AddProspectForm({ onClose, onSaved, onError }: {
   }
 
   return (
-    <form onSubmit={submit} className="bg-white rounded-xl border border-gray-200 p-4 mb-4 grid grid-cols-4 gap-3 items-end">
+    <form onSubmit={submit} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 mb-4 grid grid-cols-4 gap-3 items-end">
       {(['name', 'email', 'company', 'title'] as const).map(f => (
         <div key={f}>
-          <label className="block text-xs font-medium text-gray-600 mb-1 capitalize">{f}</label>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 capitalize">{f}</label>
           <input required={f === 'name' || f === 'email'} value={form[f]}
             onChange={e => setForm(v => ({ ...v, [f]: e.target.value }))}
-            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-500" />
         </div>
       ))}
       <div className="flex gap-2">
@@ -307,7 +307,7 @@ function AddProspectForm({ onClose, onSaved, onError }: {
           Save
         </button>
         <button type="button" onClick={onClose}
-          className="py-1.5 px-3 bg-white hover:bg-gray-50 border border-gray-300 text-sm rounded-lg transition-colors">
+          className="py-1.5 px-3 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 text-sm rounded-lg transition-colors dark:text-gray-300">
           Cancel
         </button>
       </div>
@@ -324,10 +324,10 @@ function AssignModal({ prospectIds, sequences, onClose, onAssign }: {
   const [seqId, setSeqId] = useState<number | ''>('')
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl p-6 w-80">
-        <h3 className="text-sm font-semibold mb-3">Assign sequence to {prospectIds.length} prospect{prospectIds.length > 1 ? 's' : ''}</h3>
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl p-6 w-80 border border-gray-200 dark:border-gray-700">
+        <h3 className="text-sm font-semibold mb-3 dark:text-gray-100">Assign sequence to {prospectIds.length} prospect{prospectIds.length > 1 ? 's' : ''}</h3>
         <select value={seqId} onChange={e => setSeqId(Number(e.target.value))}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100">
           <option value="">Select a sequence…</option>
           {sequences.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
@@ -337,7 +337,7 @@ function AssignModal({ prospectIds, sequences, onClose, onAssign }: {
             Assign
           </button>
           <button onClick={onClose}
-            className="py-2 px-4 bg-white hover:bg-gray-50 border border-gray-300 text-sm rounded-lg transition-colors">
+            className="py-2 px-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 text-sm rounded-lg transition-colors dark:text-gray-300">
             Cancel
           </button>
         </div>

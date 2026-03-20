@@ -85,7 +85,7 @@ export default function SequencesPage() {
       {/* Sequence list */}
       <div className="w-64 flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-xl font-semibold text-gray-900">Sequences</h1>
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Sequences</h1>
           <button onClick={() => setShowNew(true)}
             className="p-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors">
             <Plus className="w-3.5 h-3.5" />
@@ -103,7 +103,7 @@ export default function SequencesPage() {
         <div className="space-y-1">
           {sequences?.map(s => (
             <button key={s.id} onClick={() => setSelected(s.id)}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${selected === s.id ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'}`}>
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${selected === s.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'}`}>
               <span className="font-medium truncate">{s.name}</span>
               <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" />
             </button>
@@ -111,7 +111,7 @@ export default function SequencesPage() {
           {!sequences?.length && (
             <div className="px-3 py-4 text-center">
               <p className="text-xs font-medium text-gray-500">No sequences yet</p>
-              <p className="text-xs text-gray-400 mt-0.5">Press + to create one.</p>
+              <p className="text-xs text-gray-400 mt-0.5 dark:text-gray-600">Press + to create one.</p>
             </div>
           )}
         </div>
@@ -122,7 +122,7 @@ export default function SequencesPage() {
         <div className="flex-1">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">{seq.name}</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{seq.name}</h2>
               {seq.bcc_email && <p className="text-xs text-gray-400">BCC: {seq.bcc_email}</p>}
             </div>
             <button onClick={() => delSeqMut.mutate(selected)}
@@ -131,8 +131,8 @@ export default function SequencesPage() {
             </button>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-3">Steps (drag to reorder)</h3>
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 mb-4">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Steps (drag to reorder)</h3>
             {steps && steps.length > 0 ? (
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                 <SortableContext items={steps.map(s => s.id)} strategy={verticalListSortingStrategy}>
@@ -173,8 +173,8 @@ function SortableStep({ step, index, templateName, onDelete }: {
   const style = { transform: CSS.Transform.toString(transform), transition }
 
   return (
-    <div ref={setNodeRef} style={style} className="flex items-center gap-3 py-2.5 border-b border-gray-100 last:border-0">
-      <button {...attributes} {...listeners} className="text-gray-300 hover:text-gray-500 cursor-grab active:cursor-grabbing">
+    <div ref={setNodeRef} style={style} className="flex items-center gap-3 py-2.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
+      <button {...attributes} {...listeners} className="text-gray-300 hover:text-gray-500 dark:hover:text-gray-400 cursor-grab active:cursor-grabbing">
         <GripVertical className="w-4 h-4" />
       </button>
       <div className="flex-1 flex items-center gap-3">
@@ -182,7 +182,7 @@ function SortableStep({ step, index, templateName, onDelete }: {
           {index + 1}
         </span>
         <div>
-          <div className="text-sm font-medium text-gray-900">{templateName}</div>
+          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{templateName}</div>
           <div className="text-xs text-gray-400">Day {step.delay_days}</div>
         </div>
       </div>
@@ -220,13 +220,13 @@ function AddStepForm({ sequenceId, templates, onSaved, onError }: {
   }
 
   return (
-    <form onSubmit={submit} className="bg-white rounded-xl border border-gray-200 p-4">
-      <h3 className="text-sm font-medium text-gray-700 mb-3">Add step</h3>
+    <form onSubmit={submit} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+      <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Add step</h3>
       <div className="flex gap-3 items-end">
         <div className="flex-1">
           <label className="block text-xs text-gray-500 mb-1">Template</label>
           <select required value={templateId} onChange={e => setTemplateId(Number(e.target.value))}
-            className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100">
             <option value="">Select template…</option>
             {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
@@ -234,7 +234,7 @@ function AddStepForm({ sequenceId, templates, onSaved, onError }: {
         <div className="w-28">
           <label className="block text-xs text-gray-500 mb-1">Send on day</label>
           <input type="number" min={0} value={delay} onChange={e => setDelay(Number(e.target.value))}
-            className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100" />
         </div>
         <button type="submit" disabled={loading || !templateId}
           className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
@@ -268,18 +268,18 @@ function NewSeqForm({ onClose, onSaved, onError }: {
   }
 
   return (
-    <form onSubmit={submit} className="bg-white rounded-xl border border-gray-200 p-3 mb-3 space-y-2">
+    <form onSubmit={submit} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-3 mb-3 space-y-2">
       <input required placeholder="Sequence name" value={name} onChange={e => setName(e.target.value)}
-        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-500" />
       <input placeholder="BCC email (optional)" value={bcc} onChange={e => setBcc(e.target.value)}
-        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-500" />
       <div className="flex gap-2">
         <button type="submit" disabled={loading}
           className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
           Create
         </button>
         <button type="button" onClick={onClose}
-          className="py-1.5 px-3 border border-gray-300 text-xs rounded-lg hover:bg-gray-50 transition-colors">
+          className="py-1.5 px-3 border border-gray-300 dark:border-gray-600 text-xs rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors dark:text-gray-300">
           Cancel
         </button>
       </div>
