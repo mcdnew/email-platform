@@ -3,7 +3,7 @@
 A modern, full-stack email campaign platform built with:
 
 - ✅ FastAPI backend with SQLModel and Alembic migrations
-- ✅ Next.js 14 frontend with TypeScript, Tailwind CSS, and TanStack Table
+- ✅ Next.js 14 frontend with TypeScript, Tailwind CSS, TanStack Table, and Tiptap rich-text editor
 - ✅ PostgreSQL (recommended) or SQLite for local dev
 - ✅ SMTP email sending with scheduling, analytics, and sequences
 - ✅ API key authentication (`X-API-Key` header) on all endpoints
@@ -298,7 +298,7 @@ email-platform/
 │   │   ├── (app)/       # Authenticated layout (dashboard, prospects, templates, sequences, queue, sent, settings)
 │   │   ├── api/         # Next.js API routes (auth cookie + proxy to FastAPI)
 │   │   └── login/       # Login page
-│   ├── src/components/  # AppShell, PaginationBar, StatusBadge, Toast
+│   ├── src/components/  # AppShell, TiptapEditor, PaginationBar, StatusBadge, Toast, TimelineDrawer
 │   ├── src/lib/         # API client (api.ts), type definitions (types.ts)
 │   └── package.json     # Next.js 14, TanStack Table, Recharts, React Query
 ├── migrations/

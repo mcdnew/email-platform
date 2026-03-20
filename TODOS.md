@@ -18,13 +18,9 @@ Added `?page=&per_page=&sort_by=&order=&search=` to `/prospects` and `?page=&per
 
 ---
 
-## HTML email templates (Tiptap)
-**What:** Replace the plain `<textarea>` template editor with Tiptap (ProseMirror) to support HTML emails — bold, italic, links, images.
-**Why:** Phase 2 chose a plain textarea + live preview because current emails are plain-text. If HTML emails are ever needed, Tiptap is the right WYSIWYG editor for Next.js.
-**Pros:** Rich formatting. Supports branded emails with inline styles.
-**Cons:** ~150KB bundle addition. Requires a custom Tiptap extension for `{{name}}`-style variable insertion. HTML→plain-text round-trip for SMTP multipart emails.
-**Context:** Phase 2 deferred this in eng review (2026-03-20). Templates currently use `{{variable}}` Jinja-style syntax in plain text. Server-side rendering via Jinja2 is already wired.
-**Depends on:** Phase 2 complete.
+## ~~HTML email templates (Tiptap)~~
+**Completed:** Phase 2 (2026-03-20) — SSR crash fixed commit `75c249d`
+Tiptap (ProseMirror) rich-text editor is live in the templates page (`frontend/src/components/TiptapEditor.tsx`). Supports bold, italic, underline, headings, bullet/ordered lists, links, and `{{variable}}` insertion via a toolbar dropdown. SSR hydration crash fixed by adding `immediatelyRender: false` to `useEditor()`. Variable preview renders HTML live in the template card.
 
 ---
 
