@@ -6,6 +6,9 @@ A modern, full-stack email campaign platform built with:
 - ✅ Streamlit frontend with a smooth UI and dashboard
 - ✅ PostgreSQL (recommended) or SQLite for local dev
 - ✅ SMTP email sending with scheduling, analytics, and sequences
+- ✅ API key authentication (`X-API-Key` header) on all endpoints
+- ✅ Open-tracking pixel with unsubscribe token support
+- ✅ 42-test suite with pytest (71% coverage)
 - ✅ Docker + Bare-metal support
 
 ---
@@ -16,7 +19,9 @@ A modern, full-stack email campaign platform built with:
 - 📝 Create email templates with Jinja-style placeholders (`{{ name }}`)
 - 🔁 Build multi-step sequences with configurable delays
 - 📆 Automatic email scheduling with CRON-based delivery
-- 📊 Analytics dashboard with open/click tracking
+- 📊 Analytics dashboard with open tracking (pixel-based)
+- 🔐 API key auth — all endpoints require `X-API-Key` (disabled when unset for local dev)
+- 🚫 Unsubscribe links via signed tokens (itsdangerous) — purges pending emails on click
 - 🧪 Send test emails before launch
 - 🌙 Auto dark mode with responsive frontend
 - 🐳 Docker or bare-metal deployment
@@ -65,12 +70,17 @@ pip install -r requirements.txt
 
 ```env
 # .env
-DATABASE_URL=postgresql://email_user:strongpassword@localhost:5432/email_platform
+DATABASE_URL=postgresql://email_user:<password>@localhost:5432/email_platform
 SMTP_SERVER=smtp.office365.com
 SMTP_PORT=587
 SMTP_USER=your@email.com
 SMTP_PASSWORD=your-app-password
 MAX_EMAILS_PER_DAY=100
+TIMEZONE=Europe/Paris
+
+# API key — required for all endpoints. Leave empty to disable auth in local dev.
+# Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+API_KEY=
 ```
 
 ### 5. Set up the database
@@ -130,8 +140,16 @@ docker compose up --build
 
 ## 🔐 Environment Files
 
-- **`.env`**: root config for backend and database
-- **`frontend/.env`**: contains API_URL and APP_PASSWORD for frontend Streamlit
+- **`.env`**: root config for backend and database (see `.env.example` for all variables)
+- **`frontend/.env`**: contains `API_URL` and `APP_PASSWORD` for the Streamlit frontend
+
+Key variables added in Phase 1 hardening:
+
+| Variable | Purpose |
+|----------|---------|
+| `API_KEY` | Shared secret for `X-API-Key` header auth. Leave empty to disable (dev only). |
+| `TIMEZONE` | Timezone for send-window enforcement (e.g. `Europe/Paris`). |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Required when using Docker Compose. |
 
 ---
 
@@ -176,11 +194,25 @@ Dashboard shows:
 
 | Issue | Solution |
 |-------|----------|
-| SMTP fails | Check your .env and credentials |
+| SMTP fails | Check your `.env` credentials and SMTP server/port |
 | Database errors | Recreate the DB or use `alembic downgrade base` then `upgrade head` |
-| Email not sending | Check if status = pending and run scheduler |
-| Cannot delete sequence/template | Make sure it's not referenced in ScheduledEmail |
-| Port already in use | Stop other services on 8000/8501 or edit the ports in docker-compose.yml |
+| Email not sending | Check status = `pending` and `send_at` is in the past, then run force-scheduler |
+| Cannot delete sequence/template | Remove it from all sequence steps first |
+| Port already in use | Stop other services on 8000/8501 or change ports in `docker-compose.yml` |
+| 401 Unauthorized | Set `API_KEY` in `.env` (or leave empty to disable auth in dev) |
+| Unsubscribe link broken | Ensure `API_KEY` hasn't changed since the link was generated — tokens are signed with it |
+
+---
+
+## 🧪 Running Tests
+
+```bash
+pytest tests/ -v
+# with coverage:
+pytest tests/ --cov=app --cov-report=term-missing
+```
+
+The test suite uses an in-memory SQLite database and mocks SMTP — no external services needed.
 
 ---
 
@@ -189,6 +221,7 @@ Dashboard shows:
 ### Init/reset database (dangerous in production):
 
 ```bash
+# Requires DEV_MODE=true in .env
 curl -X POST http://localhost:8000/reset-all
 ```
 
@@ -212,7 +245,7 @@ alembic upgrade head
 docker compose up --build -d
 ```
 
-See `docs/deployment_manual.md` for full steps.
+See `email_platform_deployment_manual.md` for full steps.
 
 ---
 
@@ -248,16 +281,26 @@ alembic upgrade head
 ```
 email-platform/
 ├── app/
-│   ├── main.py
-│   ├── models.py
-│   ├── mailer.py
-│   └── ...
+│   ├── main.py          # FastAPI app, all routes, scheduler logic
+│   ├── models.py        # SQLModel table definitions
+│   ├── mailer.py        # SMTP send + tracking pixel injection
+│   ├── tracking.py      # Unsubscribe token sign/verify (itsdangerous)
+│   ├── crud.py          # DB helpers and bulk sequence assignment
+│   ├── config.py        # Settings loaded from .env
+│   ├── database.py      # SQLAlchemy engine + session
+│   ├── schemas.py       # Pydantic request/response schemas
+│   ├── dev.py           # Dev-only endpoints (generate test data)
+│   └── routes/
+│       └── open_tracking.py  # GET /track_open — pixel endpoint
 ├── frontend/
-│   └── main.py
+│   └── main.py          # Streamlit UI
 ├── migrations/
-│   └── versions/
-├── .env
+│   └── versions/        # Alembic migration files
+├── tests/               # pytest suite (42 tests, 71% coverage)
+├── .env.example         # Template for all environment variables
 ├── docker-compose.yml
+├── run_scheduler.sh     # Cron wrapper — calls POST /run-scheduler
+├── TODOS.md             # Deferred work items
 └── README.md
 ```
 

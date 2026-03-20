@@ -51,12 +51,12 @@ sudo -u postgres psql
 In the psql prompt, run:
 
 ```sql
-CREATE ROLE email_user WITH LOGIN PASSWORD 'strongpassword';
+CREATE ROLE email_user WITH LOGIN PASSWORD '<your-strong-password>';
 CREATE DATABASE email_platform OWNER email_user;
 \q
 ```
 
-**Tip:** You can choose any username/password—just keep them consistent in your .env.
+**Tip:** Choose any username/password — keep them consistent with your `.env`.
 
 ### 5. Clone & Configure the Backend
 
@@ -70,14 +70,19 @@ cp .env.example .env
 Edit .env (`nano .env`) and set:
 
 ```ini
-DATABASE_URL=postgresql://email_user:strongpassword@localhost:5432/email_platform
+DATABASE_URL=postgresql://email_user:<strong-password>@localhost:5432/email_platform
 SMTP_SERVER=smtp.example.com
 SMTP_PORT=587
 SMTP_USER=you@example.com
 SMTP_PASSWORD=your_smtp_password
 SMTP_BCC=
 MAX_EMAILS_PER_DAY=100
-SCHEDULER_SECRET=
+TIMEZONE=Europe/Paris
+
+# API key — protects all backend endpoints. Generate with:
+# python -c "import secrets; print(secrets.token_hex(32))"
+API_KEY=
+APP_PASSWORD=your-ui-password
 ```
 
 ### 6. Install & Migrate the Backend
@@ -250,14 +255,23 @@ Edit `.env`:
 
 ```ini
 # .env
-DATABASE_URL=postgresql://email_user:strongpassword@db:5432/email_platform
+DATABASE_URL=postgresql://email_user:${POSTGRES_PASSWORD}@db:5432/email_platform
+POSTGRES_USER=email_user
+POSTGRES_PASSWORD=<strong-random-password>
+POSTGRES_DB=email_platform
+
 SMTP_SERVER=smtp.example.com
 SMTP_PORT=587
 SMTP_USER=you@example.com
 SMTP_PASSWORD=your_smtp_password
 SMTP_BCC=
 MAX_EMAILS_PER_DAY=100
-SCHEDULER_SECRET=
+TIMEZONE=Europe/Paris
+
+# API key — protects all backend endpoints. Generate with:
+# python -c "import secrets; print(secrets.token_hex(32))"
+API_KEY=
+APP_PASSWORD=your-ui-password
 ```
 
 Edit `frontend/.env`:
