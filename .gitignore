@@ -49,3 +49,5 @@ htmlcov/
 
 # Error logs
 error_log.txt
+error_log.txt
+frontend/tsconfig.tsbuildinfo
