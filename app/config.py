@@ -78,6 +78,12 @@ class Settings:
     # Maximum number of times a failed email will be retried via POST /retry-failed.
     MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", 3))
 
+    # ── Logging ───────────────────────────────────────────────────────────────────
+    # Log level for app.* loggers (DEBUG / INFO / WARNING / ERROR).
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    # File path for the JSON log (also served by GET /error-log in DEV_MODE).
+    LOG_PATH: str = os.getenv("LOG_PATH", "error_log.txt")
+
 # Instantiate a single settings object to import elsewhere
 settings = Settings()
 

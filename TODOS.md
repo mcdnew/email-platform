@@ -38,10 +38,6 @@ Added `?page=&per_page=&sort_by=&order=&search=` to `/prospects` and `?page=&per
 
 ---
 
-## Structured JSON logging
-**What:** Replace the current plain-text file logger with Python's `logging` module using a JSON formatter (or `structlog`).
-**Why:** Current logs are unstructured plain text — hard to grep for specific errors, no log levels surfaced, no correlation IDs, impossible to ship to a log aggregator.
-**Pros:** Easier to debug production issues. Immediately compatible with Loki, Datadog, CloudWatch, or any log aggregator. `structlog` adds context binding (e.g., `log.bind(prospect_id=X)`).
-**Cons:** Minor refactor of logging calls throughout `app/`. ~30 min CC.
-**Context:** Current error log path: `error_log.txt`. The `/error-log` endpoint reads it directly. Both the endpoint and the file path would need updating. The Docker Compose setup should also redirect stdout to a log driver.
-**Depends on:** Nothing.
+## ~~Structured JSON logging~~
+**Completed:** v1.0 (2026-03-20)
+`app/logging_config.py` — `JsonFormatter` + `configure_logging()`. All `app.*` loggers emit JSON lines to stdout and `error_log.txt`. Structured events: `email_sent`, `email_failed`, `email_skipped_unsubscribed`, `email_skipped_missing`, `smtp_failure`, `template_render_error`, `email_opened`, `daily_limit_reached`, `unhandled_exception`. `/error-log` endpoint returns parsed `{"entries": [...]}`. `LOG_LEVEL` and `LOG_PATH` configurable via env.

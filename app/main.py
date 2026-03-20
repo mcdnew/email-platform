@@ -1,5 +1,6 @@
 # app/main.py
 
+import json
 import os
 import logging
 from datetime import datetime, date, time
@@ -25,9 +26,14 @@ from app.schemas import (
 from app.mailer import send_email
 from app.config import settings
 from app.tracking import load_unsubscribe_token
+from app.logging_config import configure_logging
 from app import crud
 from app.routes import open_tracking
 from app.dev import router as dev_router
+
+# ────────────── Structured JSON Logging ──────────────
+configure_logging(log_path=settings.LOG_PATH, level=settings.LOG_LEVEL)
+logger = logging.getLogger(__name__)
 
 # ────────────── App & Routers ──────────────
 app = FastAPI()
@@ -51,35 +57,39 @@ def require_api_key(api_key: str = Security(_api_key_header)):
 CET        = pytz.timezone(settings.TIMEZONE)
 SEND_START = time(0, 0)
 SEND_END   = time(23, 59)
-LOG_PATH   = "error_log.txt"
-
-# ────────────── Error Logging ──────────────
-elog = logging.getLogger("error_logger")
-elog.setLevel(logging.ERROR)
-if not elog.handlers:
-    fh = logging.FileHandler(LOG_PATH)
-    fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
-    elog.addHandler(fh)
 
 @app.exception_handler(Exception)
 async def _unhandled(request: Request, exc: Exception):
-    elog.error("URL: %s METHOD: %s\n%r", request.url, request.method, exc)
+    logger.error(
+        "unhandled_exception",
+        extra={"url": str(request.url), "method": request.method, "error": repr(exc)},
+        exc_info=exc,
+    )
     return JSONResponse(status_code=500, content={"detail": "Internal error"})
 
 @app.get("/error-log", dependencies=[Depends(require_api_key)])
 def get_error_log():
     if os.getenv("DEV_MODE", "false").lower() != "true":
         raise HTTPException(status_code=403, detail="Not allowed in production")
-    if not os.path.exists(LOG_PATH):
-        return {"log": ""}
-    with open(LOG_PATH) as f:
-        return {"log": f.read()}
+    if not os.path.exists(settings.LOG_PATH):
+        return {"entries": []}
+    entries = []
+    with open(settings.LOG_PATH) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                entries.append({"event": line})  # fallback for legacy plain-text lines
+    return {"entries": entries}
 
 @app.post("/clear-error-log", dependencies=[Depends(require_api_key)])
 def clear_error_log():
     if os.getenv("DEV_MODE", "false").lower() != "true":
         raise HTTPException(status_code=403, detail="Not allowed in production")
-    with open(LOG_PATH, "w"):
+    with open(settings.LOG_PATH, "w"):
         pass
     return {"message": "Error log cleared"}
 
@@ -146,9 +156,11 @@ def _process_emails(db: Session, enforce_limits: bool = True) -> str:
 
     if enforce_limits:
         if not (_is_working(now) and SEND_START <= now.time() <= SEND_END):
+            logger.debug("scheduler_skipped", extra={"reason": "outside_window"})
             return "outside window"
         sent_today = _sent_today(db)
         if sent_today >= settings.MAX_EMAILS_PER_DAY:
+            logger.warning("daily_limit_reached", extra={"sent_today": sent_today, "limit": settings.MAX_EMAILS_PER_DAY})
             return "daily limit reached"
     else:
         sent_today = 0
@@ -190,11 +202,13 @@ def _process_emails(db: Session, enforce_limits: bool = True) -> str:
         template = db.get(EmailTemplate, sched.template_id)
 
         if not (prospect and template):
+            logger.warning("email_skipped_missing", extra={"scheduled_email_id": sched.id, "prospect_id": sched.prospect_id})
             sched.status = "failed"
             db.add(sched)
             continue
 
         if prospect.unsubscribed:
+            logger.info("email_skipped_unsubscribed", extra={"prospect_id": prospect.id, "to": prospect.email})
             sched.status = "failed"
             db.add(sched)
             continue
@@ -241,8 +255,16 @@ def _process_emails(db: Session, enforce_limits: bool = True) -> str:
         db.add(sent_record)
 
         if ok:
+            logger.info("email_sent", extra={
+                "email_id": sent_record.id, "prospect_id": prospect.id,
+                "to": prospect.email, "template_id": template.id,
+            })
             processed += 1
             sent_today += 1
+        else:
+            logger.warning("email_failed", extra={
+                "email_id": sent_record.id, "prospect_id": prospect.id, "to": prospect.email,
+            })
 
     db.commit()
     return f"processed {processed}"

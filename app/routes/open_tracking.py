@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import Response
 from sqlmodel import Session
@@ -5,6 +6,7 @@ from app.database import get_session
 from app.models import SentEmail
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.get("/track_open")
 def track_open(email_id: int, session: Session = Depends(get_session)):
@@ -16,6 +18,7 @@ def track_open(email_id: int, session: Session = Depends(get_session)):
         email.status = "opened"
         session.add(email)
         session.commit()
+        logger.info("email_opened", extra={"email_id": email_id, "to": email.to})
 
     # Transparent 1x1 GIF
     pixel = b"\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff\x21\xf9\x04\x01\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x4c\x01\x00\x3b"

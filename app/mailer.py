@@ -24,7 +24,7 @@ def render_template(text: str, context: dict) -> str:
         template = Template(text, undefined=StrictUndefined)
         return template.render(**context)
     except UndefinedError as e:
-        logger.warning("Template rendering error: %s", e)
+        logger.warning("template_render_error", extra={"error": str(e)})
         return text  # fallback to raw body
 
 
@@ -80,5 +80,5 @@ def send_email(
             server.send_message(msg)
         return True
     except Exception as e:
-        logger.error("Failed to send email to %s: %s", to_email, e)
+        logger.error("smtp_failure", extra={"to": to_email, "error": str(e)}, exc_info=e)
         return False
