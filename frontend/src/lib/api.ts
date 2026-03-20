@@ -117,3 +117,15 @@ export const forceScheduler = () => req<{ message: string }>('/force-scheduler',
 // ── Test email ─────────────────────────────────────────────────────────────
 export const sendTestEmail = (data: { email: string; subject: string; body: string }) =>
   req<{ message: string }>('/send-test', { method: 'POST', body: JSON.stringify(data) })
+
+// ── Error log ───────────────────────────────────────────────────────────────
+export type LogEntry = {
+  timestamp: string
+  level: string
+  logger?: string
+  event: string
+  [key: string]: unknown
+}
+
+export const getErrorLog  = () => req<{ entries: LogEntry[] }>('/error-log')
+export const clearErrorLog = () => req<{ message: string }>('/clear-error-log', { method: 'POST' })

@@ -1,10 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { runScheduler, forceScheduler, sendTestEmail } from '@/lib/api'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { runScheduler, forceScheduler, sendTestEmail, getErrorLog, clearErrorLog } from '@/lib/api'
+import type { LogEntry } from '@/lib/api'
 import { Toast } from '@/components/Toast'
 import { useToast } from '@/hooks/useToast'
-import { Play, Zap, Send } from 'lucide-react'
+import { Play, Zap, Send, RefreshCw, Trash2 } from 'lucide-react'
 
 export default function SettingsPage() {
   const { toast, showToast } = useToast()
@@ -87,7 +89,121 @@ export default function SettingsPage() {
         </form>
       </section>
 
+      <LogViewer />
+
       <Toast toast={toast} />
+    </div>
+  )
+}
+
+// ── Known fields stripped from context display ────────────────────────────
+const KNOWN_FIELDS = new Set(['timestamp', 'level', 'logger', 'event'])
+
+const LEVEL_STYLES: Record<string, string> = {
+  DEBUG:    'bg-gray-100 text-gray-600',
+  INFO:     'bg-blue-100 text-blue-700',
+  WARNING:  'bg-amber-100 text-amber-700',
+  ERROR:    'bg-red-100 text-red-700',
+  CRITICAL: 'bg-red-200 text-red-800',
+}
+
+function fmtTime(ts: string) {
+  try {
+    const d = new Date(ts)
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  } catch { return ts }
+}
+
+function LogViewer() {
+  const qc = useQueryClient()
+  const { showToast } = useToast()
+  const [enabled, setEnabled] = useState(false)
+
+  const { data, isFetching, error } = useQuery({
+    queryKey: ['error-log'],
+    queryFn: getErrorLog,
+    enabled,
+    refetchOnWindowFocus: false,
+    retry: false,
+  })
+
+  const clearMut = useMutation({
+    mutationFn: clearErrorLog,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['error-log'] }); showToast('Log cleared') },
+    onError: (e: unknown) => showToast(e instanceof Error ? e.message : String(e), 'err'),
+  })
+
+  const entries = data?.entries ?? []
+
+  return (
+    <section className="bg-white rounded-xl border border-gray-200 p-5 mt-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Activity log</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Structured JSON log from the backend (DEV_MODE only).</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setEnabled(true); qc.invalidateQueries({ queryKey: ['error-log'] }) }}
+            disabled={isFetching}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3 h-3 ${isFetching ? 'animate-spin' : ''}`} />
+            {isFetching ? 'Loading…' : 'Load / Refresh'}
+          </button>
+          {entries.length > 0 && (
+            <button
+              onClick={() => clearMut.mutate()}
+              disabled={clearMut.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
+            >
+              <Trash2 className="w-3 h-3" /> Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      {error && (
+        <p className="text-xs text-red-500 py-4 text-center">
+          {error instanceof Error ? error.message : 'Failed to load log'}
+        </p>
+      )}
+
+      {!enabled && !error && (
+        <p className="text-xs text-gray-400 py-6 text-center">Click "Load / Refresh" to view the log.</p>
+      )}
+
+      {enabled && !isFetching && !error && entries.length === 0 && (
+        <p className="text-xs text-gray-400 py-6 text-center">Log is empty.</p>
+      )}
+
+      {entries.length > 0 && (
+        <div className="max-h-96 overflow-y-auto rounded-lg border border-gray-100 divide-y divide-gray-50">
+          {[...entries].reverse().map((entry, i) => (
+            <LogRow key={i} entry={entry} />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function LogRow({ entry }: { entry: LogEntry }) {
+  const level = entry.level ?? 'INFO'
+  const ctx = Object.entries(entry).filter(([k]) => !KNOWN_FIELDS.has(k))
+
+  return (
+    <div className="flex items-start gap-2.5 px-3 py-2 hover:bg-gray-50 text-xs font-mono">
+      <span className="text-gray-400 shrink-0 w-20">{fmtTime(entry.timestamp)}</span>
+      <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${LEVEL_STYLES[level] ?? LEVEL_STYLES.INFO}`}>
+        {level}
+      </span>
+      <span className="font-semibold text-gray-800 shrink-0">{entry.event}</span>
+      {ctx.length > 0 && (
+        <span className="text-gray-500 break-all">
+          {ctx.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join('  ')}
+        </span>
+      )}
     </div>
   )
 }
