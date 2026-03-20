@@ -38,3 +38,14 @@ docker-compose.override.yml
 test_prospects.csv
 
 .gstack/
+
+# Frontend build artifacts
+frontend/.next/
+frontend/node_modules/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Error logs
+error_log.txt
