@@ -63,13 +63,15 @@ export default function SettingsPage() {
             <label className="block text-xs font-medium text-gray-600 mb-1">To</label>
             <input required type="email" value={testForm.email}
               onChange={e => setTestForm(v => ({ ...v, email: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              suppressHydrationWarning />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Subject</label>
             <input required value={testForm.subject}
               onChange={e => setTestForm(v => ({ ...v, subject: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              suppressHydrationWarning />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Body</label>
