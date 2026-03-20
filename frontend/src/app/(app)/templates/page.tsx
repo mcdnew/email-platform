@@ -137,6 +137,7 @@ function TemplateForm({ initial, onClose, onSaved, onError }: {
             <label className="block text-xs font-medium text-gray-600 mb-1">Body</label>
             <textarea required rows={8} value={form.body} onChange={e => setForm(v => ({ ...v, body: e.target.value }))}
               placeholder="Hi {{name}}, ..."
+              aria-label="Template body"
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono resize-none" />
           </div>
           <div>
