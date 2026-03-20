@@ -3,10 +3,12 @@
 
 import logging
 import os
+import re
 import smtplib
 import html2text
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from urllib.parse import quote
 from jinja2 import Template, StrictUndefined
 from jinja2.exceptions import UndefinedError
 
@@ -35,6 +37,7 @@ def send_email(
     bcc_email: str = None,
     context: dict = None,
     email_id: int = None,
+    smtp_override: dict = None,
 ) -> bool:
     """
     Send a multipart/alternative email via SMTP.
@@ -53,8 +56,19 @@ def send_email(
         subject = render_template(subject, context)
         body = render_template(body, context)
 
-    # Append open-tracking pixel to HTML body
+    # Rewrite links and append open-tracking pixel
     if email_id and TRACKING_BASE_URL:
+        def rewrite_link(match: re.Match) -> str:
+            original_url = match.group(1)
+            # Don't rewrite mailto: or already-rewritten tracking links
+            if original_url.startswith("mailto:") or "/track_click" in original_url:
+                return match.group(0)
+            encoded = quote(original_url, safe="")
+            tracked = f"{TRACKING_BASE_URL}/track_click?email_id={email_id}&url={encoded}"
+            return f'href="{tracked}"'
+
+        body = re.sub(r'href="([^"]+)"', rewrite_link, body)
+
         pixel = (
             f'<img src="{TRACKING_BASE_URL}/track_open?email_id={email_id}" '
             f'width="1" height="1" alt="" style="display:none;" />'
@@ -63,9 +77,15 @@ def send_email(
 
     plain_text = html2text.html2text(body)
 
+    cfg = smtp_override or {}
+    smtp_server = cfg.get("smtp_server") or settings.SMTP_SERVER
+    smtp_port = cfg.get("smtp_port") or settings.SMTP_PORT
+    smtp_user = cfg.get("smtp_user") or settings.SMTP_USER
+    smtp_password = cfg.get("smtp_password") or settings.SMTP_PASSWORD
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = settings.SMTP_USER
+    msg["From"] = smtp_user
     msg["To"] = to_email
     if bcc_email:
         msg["Bcc"] = bcc_email
@@ -74,11 +94,20 @@ def send_email(
     msg.attach(MIMEText(body, "html"))
 
     try:
-        with smtplib.SMTP(settings.SMTP_SERVER, settings.SMTP_PORT) as server:
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.login(smtp_user, smtp_password)
             server.send_message(msg)
-        return True
+        return "sent"
+    except smtplib.SMTPRecipientsRefused as e:
+        logger.error("smtp_bounce", extra={"to": to_email, "error": str(e)})
+        return "bounced"
+    except smtplib.SMTPDataError as e:
+        # 5xx permanent failures are bounces; 4xx are transient
+        code = e.smtp_code if hasattr(e, "smtp_code") else 0
+        status = "bounced" if code >= 500 else "failed"
+        logger.error("smtp_data_error", extra={"to": to_email, "code": code, "error": str(e)})
+        return status
     except Exception as e:
         logger.error("smtp_failure", extra={"to": to_email, "error": str(e)}, exc_info=e)
-        return False
+        return "failed"

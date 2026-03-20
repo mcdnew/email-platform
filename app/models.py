@@ -56,8 +56,19 @@ class SentEmail(SQLModel, table=True):
     sent_at: datetime
     status: str  # sent, failed, opened, bounced
     prospect_id: Optional[int] = Field(default=None, foreign_key="prospect.id")
-    template_id: Optional[int] = Field(default=None, foreign_key="emailtemplate.id")  # <-- ADD THIS
-    sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")      # <-- OPTIONAL: if you need sequence info
+    template_id: Optional[int] = Field(default=None, foreign_key="emailtemplate.id")
+    sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")
+    click_count: int = Field(default=0)
+
+class SmtpSettings(SQLModel, table=True):
+    """Singleton row (id=1) that overrides env-based SMTP config when present."""
+    id: int = Field(default=1, primary_key=True)
+    smtp_server: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_bcc: Optional[str] = None
+    updated_at: Optional[datetime] = None
 
 class EmailTemplateUpdate(SQLModel):
     name: Optional[str] = None

@@ -7,15 +7,17 @@ import {
   createColumnHelper, type RowSelectionState,
 } from '@tanstack/react-table'
 import {
-  getProspects, createProspect, deleteProspect,
+  getProspects, createProspect, deleteProspect, updateProspect,
   bulkImportProspects, assignSequence, getSequences,
 } from '@/lib/api'
 import type { Prospect, ProspectCreate, Sequence } from '@/lib/types'
 import { Toast } from '@/components/Toast'
+import { TimelineDrawer } from '@/components/TimelineDrawer'
 import { PaginationBar } from '@/components/PaginationBar'
 import { useToast } from '@/hooks/useToast'
-import { Upload, Plus, ChevronUp, ChevronDown, Trash2, Link } from 'lucide-react'
+import { Upload, Plus, ChevronUp, ChevronDown, Trash2, Link, UserX, Download } from 'lucide-react'
 import Papa from 'papaparse'
+import { downloadCsv } from '@/lib/csv'
 
 const SORT_FIELDS = ['name', 'email', 'company', 'created_at'] as const
 // createColumnHelper has no dependencies — define once at module scope
@@ -32,11 +34,15 @@ export default function ProspectsPage() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [assignModal, setAssignModal] = useState<number[] | null>(null)
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+  const [unsubFilter, setUnsubFilter] = useState<'all' | 'active' | 'unsubscribed'>('all')
+  const [timelineProspect, setTimelineProspect] = useState<Prospect | null>(null)
   const { toast, showToast } = useToast()
 
+  const unsubscribedParam = unsubFilter === 'unsubscribed' ? 'true' : unsubFilter === 'active' ? 'false' : undefined
+
   const { data, isLoading } = useQuery({
-    queryKey: ['prospects', page, debouncedSearch, sortBy, order],
-    queryFn: () => getProspects({ page, per_page: 50, sort_by: sortBy, order, search: debouncedSearch }),
+    queryKey: ['prospects', page, debouncedSearch, sortBy, order, unsubFilter],
+    queryFn: () => getProspects({ page, per_page: 50, sort_by: sortBy, order, search: debouncedSearch, unsubscribed: unsubscribedParam }),
   })
 
   const { data: sequences } = useQuery({ queryKey: ['sequences'], queryFn: getSequences })
@@ -50,6 +56,13 @@ export default function ProspectsPage() {
   const assignMut = useMutation({
     mutationFn: assignSequence,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['prospects'] }); setAssignModal(null); showToast('Sequence assigned') },
+    onError: (e: unknown) => showToast(e instanceof Error ? e.message : String(e), 'err'),
+  })
+
+  const toggleUnsubMut = useMutation({
+    mutationFn: ({ id, unsubscribed }: { id: number; unsubscribed: boolean }) =>
+      updateProspect(id, { unsubscribed }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['prospects'] }); showToast('Updated') },
     onError: (e: unknown) => showToast(e instanceof Error ? e.message : String(e), 'err'),
   })
 
@@ -116,7 +129,21 @@ export default function ProspectsPage() {
         />
       ),
     }),
-    col.accessor('name', { header: 'Name' }),
+    col.accessor('name', {
+      header: 'Name',
+      cell: i => (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setTimelineProspect(i.row.original)}
+            className="font-medium text-blue-600 dark:text-blue-400 hover:underline text-left">
+            {i.getValue()}
+          </button>
+          {i.row.original.unsubscribed && (
+            <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-medium">unsub</span>
+          )}
+        </div>
+      ),
+    }),
     col.accessor('email', { header: 'Email' }),
     col.accessor('company', { header: 'Company', cell: i => i.getValue() ?? '—' }),
     col.accessor('title', { header: 'Title', cell: i => i.getValue() ?? '—' }),
@@ -139,13 +166,21 @@ export default function ProspectsPage() {
       id: 'actions',
       header: '',
       cell: ({ row }) => (
-        <button onClick={() => deleteMut.mutate(row.original.id)}
-          className="p-1 text-gray-400 hover:text-red-600 transition-colors">
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            title={row.original.unsubscribed ? 'Resubscribe' : 'Unsubscribe'}
+            onClick={() => toggleUnsubMut.mutate({ id: row.original.id, unsubscribed: !row.original.unsubscribed })}
+            className={`p-1 transition-colors ${row.original.unsubscribed ? 'text-red-400 hover:text-gray-500' : 'text-gray-400 hover:text-red-500'}`}>
+            <UserX className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={() => deleteMut.mutate(row.original.id)}
+            className="p-1 text-gray-400 hover:text-red-600 transition-colors">
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
       ),
     }),
-  ], [deleteMut.mutate])
+  ], [deleteMut.mutate, toggleUnsubMut.mutate])
 
   const table = useReactTable({
     data: data?.items ?? [],
@@ -171,6 +206,15 @@ export default function ProspectsPage() {
               Assign sequence ({selectedIds.length})
             </button>
           )}
+          <button
+            onClick={() => downloadCsv(
+              (data?.items ?? []).map(p => ({ name: p.name, email: p.email, company: p.company ?? '', title: p.title ?? '', sequence: p.sequence_name ?? '', unsubscribed: p.unsubscribed })),
+              'prospects.csv'
+            )}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors">
+            <Download className="w-3.5 h-3.5" />
+            Export CSV
+          </button>
           <label className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer transition-colors">
             <Upload className="w-3.5 h-3.5" />
             Import CSV
@@ -192,14 +236,20 @@ export default function ProspectsPage() {
         />
       )}
 
-      <div className="mb-3">
+      <div className="mb-3 flex items-center gap-2">
         <input
           type="search"
           placeholder="Search name, email, company…"
           value={search}
           onChange={e => handleSearch(e.target.value)}
-          className="w-80 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-500"
+          className="w-72 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-500"
         />
+        <select value={unsubFilter} onChange={e => { setUnsubFilter(e.target.value as typeof unsubFilter); setPage(1) }}
+          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100">
+          <option value="all">All prospects</option>
+          <option value="active">Active only</option>
+          <option value="unsubscribed">Unsubscribed only</option>
+        </select>
       </div>
 
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -266,6 +316,10 @@ export default function ProspectsPage() {
       )}
 
       <Toast toast={toast} />
+
+      {timelineProspect && (
+        <TimelineDrawer prospect={timelineProspect} onClose={() => setTimelineProspect(null)} />
+      )}
     </div>
   )
 }

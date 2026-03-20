@@ -2,11 +2,11 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { runScheduler, forceScheduler, sendTestEmail, getErrorLog, clearErrorLog } from '@/lib/api'
+import { runScheduler, forceScheduler, sendTestEmail, getErrorLog, clearErrorLog, getSmtpSettings, updateSmtpSettings } from '@/lib/api'
 import type { LogEntry } from '@/lib/api'
 import { Toast } from '@/components/Toast'
 import { useToast } from '@/hooks/useToast'
-import { Play, Zap, Send, RefreshCw, Trash2 } from 'lucide-react'
+import { Play, Zap, Send, RefreshCw, Trash2, Save } from 'lucide-react'
 
 export default function SettingsPage() {
   const { toast, showToast } = useToast()
@@ -89,10 +89,94 @@ export default function SettingsPage() {
         </form>
       </section>
 
+      <SmtpSettingsForm />
+
       <LogViewer />
 
       <Toast toast={toast} />
     </div>
+  )
+}
+
+// ── SMTP Settings Form ───────────────────────────────────────────────────────
+function SmtpSettingsForm() {
+  const qc = useQueryClient()
+  const { showToast } = useToast()
+  const { data, isLoading } = useQuery({ queryKey: ['smtp-settings'], queryFn: getSmtpSettings })
+
+  const [form, setForm] = useState({ smtp_server: '', smtp_port: '', smtp_user: '', smtp_password: '', smtp_bcc: '' })
+  const [dirty, setDirty] = useState(false)
+
+  // Populate form once data loads (only if user hasn't started editing)
+  if (data && !dirty && form.smtp_server === '') {
+    setForm({
+      smtp_server: data.smtp_server ?? '',
+      smtp_port: String(data.smtp_port ?? ''),
+      smtp_user: data.smtp_user ?? '',
+      smtp_password: '',
+      smtp_bcc: data.smtp_bcc ?? '',
+    })
+  }
+
+  const saveMut = useMutation({
+    mutationFn: () => updateSmtpSettings({
+      smtp_server: form.smtp_server || undefined,
+      smtp_port: form.smtp_port ? Number(form.smtp_port) : undefined,
+      smtp_user: form.smtp_user || undefined,
+      smtp_password: form.smtp_password || undefined,
+      smtp_bcc: form.smtp_bcc,
+    }),
+    onSuccess: (r) => {
+      showToast(r.message ?? 'Saved')
+      setDirty(false)
+      qc.invalidateQueries({ queryKey: ['smtp-settings'] })
+    },
+    onError: (e: unknown) => showToast(e instanceof Error ? e.message : String(e), 'err'),
+  })
+
+  function field(label: string, key: keyof typeof form, type = 'text', placeholder = '') {
+    return (
+      <div key={key}>
+        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{label}</label>
+        <input
+          type={type}
+          value={form[key]}
+          placeholder={placeholder}
+          onChange={e => { setForm(v => ({ ...v, [key]: e.target.value })); setDirty(true) }}
+          className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-500"
+          suppressHydrationWarning
+        />
+      </div>
+    )
+  }
+
+  return (
+    <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mb-4">
+      <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">SMTP Configuration</h2>
+      <p className="text-xs text-gray-500 mb-4">
+        Override the server-level SMTP env vars.
+        {data?.source === 'env' && <span className="ml-1 text-amber-600 dark:text-amber-400">(currently using .env defaults)</span>}
+        {data?.source === 'db' && <span className="ml-1 text-green-600 dark:text-green-400">(overrides active)</span>}
+      </p>
+      {isLoading ? (
+        <p className="text-xs text-gray-400">Loading…</p>
+      ) : (
+        <form onSubmit={e => { e.preventDefault(); saveMut.mutate() }} className="space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">{field('SMTP Server', 'smtp_server', 'text', 'smtp.gmail.com')}</div>
+            <div>{field('Port', 'smtp_port', 'number', '587')}</div>
+          </div>
+          {field('Username / From address', 'smtp_user', 'email', 'you@example.com')}
+          {field('Password', 'smtp_password', 'password', '(leave blank to keep current)')}
+          {field('BCC (optional)', 'smtp_bcc', 'email', 'manager@example.com')}
+          <button type="submit" disabled={saveMut.isPending}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+            <Save className="w-3.5 h-3.5" />
+            {saveMut.isPending ? 'Saving…' : 'Save SMTP settings'}
+          </button>
+        </form>
+      )}
+    </section>
   )
 }
 

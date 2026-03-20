@@ -8,6 +8,7 @@ from typing import List, Optional
 
 import pytz
 from fastapi import FastAPI, HTTPException, Depends, Request, Security, status
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.security.api_key import APIKeyHeader
 from sqlmodel import Session, select, update
@@ -17,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from app.database import get_session
 from app.models import (
     Prospect, EmailTemplate, Sequence, SequenceStep,
-    ScheduledEmail, SentEmail,
+    ScheduledEmail, SentEmail, SmtpSettings,
 )
 from app.schemas import (
     AssignSequenceRequest, SequenceCreate, SequenceRead, TestEmailRequest,
@@ -165,6 +166,17 @@ def _process_emails(db: Session, enforce_limits: bool = True) -> str:
     else:
         sent_today = 0
 
+    # Load DB-overridden SMTP settings (if configured via /settings/smtp)
+    smtp_row = db.get(SmtpSettings, 1)
+    smtp_override = None
+    if smtp_row:
+        smtp_override = {
+            "smtp_server":   smtp_row.smtp_server,
+            "smtp_port":     smtp_row.smtp_port,
+            "smtp_user":     smtp_row.smtp_user,
+            "smtp_password": smtp_row.smtp_password,
+        }
+
     # Claim pending rows atomically: pending → sending
     # Any concurrent call will find 0 rows in this batch.
     rows_to_claim = db.exec(
@@ -237,30 +249,37 @@ def _process_emails(db: Session, enforce_limits: bool = True) -> str:
         db.add(sent_record)
         db.flush()  # assigns sent_record.id without committing
 
-        ok = send_email(
+        send_result = send_email(
             to_email=prospect.email,
             subject=template.subject,
             body=template.body,
             bcc_email=bcc,
             context=ctx,
             email_id=sent_record.id,
+            smtp_override=smtp_override,
         )
 
-        final_status = "sent" if ok else "failed"
-        sent_record.status = final_status
+        sent_record.status = send_result
         sched.sent_at = sent_ts
-        sched.status  = final_status
+        sched.status  = send_result
 
         db.add(sched)
         db.add(sent_record)
 
-        if ok:
+        if send_result == "sent":
             logger.info("email_sent", extra={
                 "email_id": sent_record.id, "prospect_id": prospect.id,
                 "to": prospect.email, "template_id": template.id,
             })
             processed += 1
             sent_today += 1
+        elif send_result == "bounced":
+            logger.warning("email_bounced", extra={
+                "email_id": sent_record.id, "prospect_id": prospect.id, "to": prospect.email,
+            })
+            # Auto-suppress bounced prospects so they never receive email again
+            prospect.unsubscribed = True
+            db.add(prospect)
         else:
             logger.warning("email_failed", extra={
                 "email_id": sent_record.id, "prospect_id": prospect.id, "to": prospect.email,
@@ -335,6 +354,7 @@ def list_scheduled(db: Session = Depends(get_session)):
             "prospect_id":    s.prospect_id,
             "prospect_name":  pros[s.prospect_id].name if s.prospect_id in pros else None,
             "prospect_email": pros[s.prospect_id].email if s.prospect_id in pros else None,
+            "template_id":    s.template_id,
             "template_name":  tmpl[s.template_id].name if s.template_id in tmpl else None,
             "send_at":        s.send_at,
             "sent_at":        s.sent_at,
@@ -342,6 +362,28 @@ def list_scheduled(db: Session = Depends(get_session)):
         }
         for s in sched
     ]
+
+class ScheduledEmailPatch(BaseModel):
+    send_at: Optional[datetime] = None
+    template_id: Optional[int] = None
+
+@app.patch("/scheduled-emails/{sid}", dependencies=[Depends(require_api_key)])
+def patch_schedule(sid: int, data: ScheduledEmailPatch, db: Session = Depends(get_session)):
+    obj = db.get(ScheduledEmail, sid)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Not found")
+    if obj.status != "pending":
+        raise HTTPException(status_code=409, detail="Only pending emails can be edited")
+    if data.send_at is not None:
+        obj.send_at = data.send_at
+    if data.template_id is not None:
+        if not db.get(EmailTemplate, data.template_id):
+            raise HTTPException(status_code=404, detail="Template not found")
+        obj.template_id = data.template_id
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return {"message": "updated"}
 
 @app.delete("/scheduled-emails/{sid}", dependencies=[Depends(require_api_key)])
 def delete_schedule(sid: int, db: Session = Depends(get_session)):
@@ -377,12 +419,13 @@ _PROSPECT_SORT = {
 
 @app.get("/prospects", dependencies=[Depends(require_api_key)])
 def list_prospects(
-    assigned:  Optional[str] = None,
-    page:      int = 1,
-    per_page:  int = 50,
-    sort_by:   str = "name",
-    order:     str = "asc",
-    search:    Optional[str] = None,
+    assigned:     Optional[str] = None,
+    unsubscribed: Optional[str] = None,
+    page:         int = 1,
+    per_page:     int = 50,
+    sort_by:      str = "name",
+    order:        str = "asc",
+    search:       Optional[str] = None,
     db: Session = Depends(get_session),
 ):
     page     = max(1, page)
@@ -393,6 +436,9 @@ def list_prospects(
     if assigned is not None:
         flag = str(assigned).lower() in {"1", "true", "yes", "on"}
         filters.append(Prospect.sequence_id.is_not(None) if flag else Prospect.sequence_id.is_(None))
+    if unsubscribed is not None:
+        flag = str(unsubscribed).lower() in {"1", "true", "yes", "on"}
+        filters.append(Prospect.unsubscribed == flag)
     if search:
         term = f"%{search}%"
         filters.append(
@@ -689,15 +735,68 @@ def analytics(db: Session = Depends(get_session)):
         ],
     }
 
+@app.get("/analytics/by-template", dependencies=[Depends(require_api_key)])
+def analytics_by_template(db: Session = Depends(get_session)):
+    templates = db.exec(select(EmailTemplate)).all()
+    result = []
+    for t in templates:
+        sent   = _scalar(db, select(func.count()).select_from(SentEmail).where(SentEmail.template_id == t.id))
+        opened = _scalar(db, select(func.count()).select_from(SentEmail).where(SentEmail.template_id == t.id, SentEmail.status == "opened"))
+        failed = _scalar(db, select(func.count()).select_from(SentEmail).where(SentEmail.template_id == t.id, SentEmail.status.in_(["failed", "bounced"])))
+        if sent == 0:
+            continue
+        result.append({
+            "id": t.id,
+            "name": t.name,
+            "subject": t.subject,
+            "sent": sent,
+            "opened": opened,
+            "failed": failed,
+            "open_rate": round(opened / sent * 100, 1) if sent else 0,
+        })
+    return sorted(result, key=lambda x: x["sent"], reverse=True)
+
+
+@app.get("/analytics/by-sequence", dependencies=[Depends(require_api_key)])
+def analytics_by_sequence(db: Session = Depends(get_session)):
+    sequences = db.exec(select(Sequence)).all()
+    result = []
+    for s in sequences:
+        sent   = _scalar(db, select(func.count()).select_from(SentEmail).where(SentEmail.sequence_id == s.id))
+        opened = _scalar(db, select(func.count()).select_from(SentEmail).where(SentEmail.sequence_id == s.id, SentEmail.status == "opened"))
+        failed = _scalar(db, select(func.count()).select_from(SentEmail).where(SentEmail.sequence_id == s.id, SentEmail.status.in_(["failed", "bounced"])))
+        if sent == 0:
+            continue
+        result.append({
+            "id": s.id,
+            "name": s.name,
+            "sent": sent,
+            "opened": opened,
+            "failed": failed,
+            "open_rate": round(opened / sent * 100, 1) if sent else 0,
+        })
+    return sorted(result, key=lambda x: x["sent"], reverse=True)
+
+
 @app.post("/send-test", dependencies=[Depends(require_api_key)])
-def send_test_email(data: TestEmailRequest):
+def send_test_email(data: TestEmailRequest, db: Session = Depends(get_session)):
+    smtp_row = db.get(SmtpSettings, 1)
+    smtp_override = None
+    if smtp_row:
+        smtp_override = {
+            "smtp_server":   smtp_row.smtp_server,
+            "smtp_port":     smtp_row.smtp_port,
+            "smtp_user":     smtp_row.smtp_user,
+            "smtp_password": smtp_row.smtp_password,
+        }
     ok = send_email(
         to_email=data.email,
         subject=data.subject,
         body=data.body,
         context={"name": "Test Name", "title": "Test Title", "company": "Test Company", "email": data.email},
+        smtp_override=smtp_override,
     )
-    if not ok:
+    if ok != "sent":
         raise HTTPException(status_code=500, detail="SMTP failed")
     return {"message": "sent"}
 
@@ -758,7 +857,19 @@ def unsubscribe(token: str, db: Session = Depends(get_session)):
 
     email = load_unsubscribe_token(token)
     if not email:
-        return HTMLResponse("<h3>Invalid or expired unsubscribe link.</h3>", status_code=400)
+        err_html = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Invalid Link</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+     background:#f9fafb;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:48px 40px;max-width:440px;width:100%;text-align:center}
+.icon{font-size:48px;margin-bottom:16px}h1{font-size:22px;font-weight:600;color:#111827;margin-bottom:10px}
+p{font-size:15px;color:#6b7280;line-height:1.6}</style></head>
+<body><div class="card"><div class="icon">✕</div>
+<h1>Invalid or expired link</h1>
+<p>This unsubscribe link is no longer valid.<br>Please contact the sender directly if you wish to unsubscribe.</p>
+</div></body></html>"""
+        return HTMLResponse(err_html, status_code=400)
 
     prospect = db.exec(select(Prospect).where(Prospect.email == email)).first()
     if prospect:
@@ -773,7 +884,34 @@ def unsubscribe(token: str, db: Session = Depends(get_session)):
         )
         db.commit()
 
-    return HTMLResponse("<h3>You've been unsubscribed.</h3>")
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unsubscribed</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+         background:#f9fafb;display:flex;align-items:center;
+         justify-content:center;min-height:100vh;padding:24px}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;
+          padding:48px 40px;max-width:440px;width:100%;text-align:center}
+    .icon{font-size:48px;margin-bottom:16px}
+    h1{font-size:22px;font-weight:600;color:#111827;margin-bottom:10px}
+    p{font-size:15px;color:#6b7280;line-height:1.6}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">✓</div>
+    <h1>You've been unsubscribed</h1>
+    <p>You won't receive any more emails from this sender.<br>
+       If this was a mistake, please contact the sender directly.</p>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(html)
 
 
 @app.post("/reset-all", status_code=status.HTTP_200_OK, dependencies=[Depends(require_api_key)])
@@ -784,6 +922,61 @@ def reset_all(db: Session = Depends(get_session)):
         db.query(model).delete()
         db.commit()
     return {"message": "all data deleted"}
+
+
+# ────────────── SMTP Settings ──────────────
+
+class SmtpSettingsPayload(BaseModel):
+    smtp_server: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_bcc: Optional[str] = None
+
+
+@app.get("/settings/smtp", dependencies=[Depends(require_api_key)])
+def get_smtp_settings(db: Session = Depends(get_session)):
+    row = db.get(SmtpSettings, 1)
+    if not row:
+        # Return env-based defaults (mask password)
+        return {
+            "smtp_server": settings.SMTP_SERVER,
+            "smtp_port": settings.SMTP_PORT,
+            "smtp_user": settings.SMTP_USER,
+            "smtp_password": "",
+            "smtp_bcc": settings.SMTP_BCC,
+            "source": "env",
+        }
+    return {
+        "smtp_server": row.smtp_server or settings.SMTP_SERVER,
+        "smtp_port": row.smtp_port or settings.SMTP_PORT,
+        "smtp_user": row.smtp_user or settings.SMTP_USER,
+        "smtp_password": "",  # never return password
+        "smtp_bcc": row.smtp_bcc if row.smtp_bcc is not None else settings.SMTP_BCC,
+        "source": "db",
+    }
+
+
+@app.put("/settings/smtp", dependencies=[Depends(require_api_key)])
+def update_smtp_settings(payload: SmtpSettingsPayload, db: Session = Depends(get_session)):
+    row = db.get(SmtpSettings, 1)
+    if not row:
+        row = SmtpSettings(id=1)
+    if payload.smtp_server is not None:
+        row.smtp_server = payload.smtp_server
+    if payload.smtp_port is not None:
+        row.smtp_port = payload.smtp_port
+    if payload.smtp_user is not None:
+        row.smtp_user = payload.smtp_user
+    if payload.smtp_password:  # only update if non-empty
+        row.smtp_password = payload.smtp_password
+    if payload.smtp_bcc is not None:
+        row.smtp_bcc = payload.smtp_bcc
+    row.updated_at = datetime.utcnow()
+    db.add(row)
+    db.commit()
+    logger.info("smtp_settings_updated", extra={"user": row.smtp_user})
+    return {"message": "SMTP settings saved"}
 
 
 # ────────────── CLI Entrypoint ──────────────

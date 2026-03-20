@@ -41,13 +41,13 @@ export const getAnalytics = () => req<AnalyticsSummary>('/analytics/summary')
 // ── Prospects ──────────────────────────────────────────────────────────────
 export const getProspects = (params: {
   page?: number; per_page?: number; sort_by?: string;
-  order?: string; search?: string; assigned?: string
+  order?: string; search?: string; assigned?: string; unsubscribed?: string
 }) => req<PaginatedResponse<Prospect>>(`/prospects${buildQs(params)}`)
 
 export const createProspect = (data: ProspectCreate) =>
   req<Prospect>('/prospects', { method: 'POST', body: JSON.stringify(data) })
 
-export const updateProspect = (id: number, data: Partial<ProspectCreate & { sequence_id: number | null }>) =>
+export const updateProspect = (id: number, data: Partial<ProspectCreate & { sequence_id: number | null; unsubscribed: boolean }>) =>
   req<Prospect>(`/prospects/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 
 export const deleteProspect = (id: number) =>
@@ -105,6 +105,9 @@ export const getQueue = () => req<ScheduledEmail[]>('/scheduled-emails')
 export const deleteQueueItem = (id: number) =>
   req<void>(`/scheduled-emails/${id}`, { method: 'DELETE' })
 
+export const patchQueueItem = (id: number, data: { send_at?: string; template_id?: number }) =>
+  req<{ message: string }>(`/scheduled-emails/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+
 // ── Sent emails ────────────────────────────────────────────────────────────
 export const getSentEmails = (params: {
   page?: number; per_page?: number; sort_by?: string; order?: string; status_filter?: string
@@ -117,6 +120,49 @@ export const forceScheduler = () => req<{ message: string }>('/force-scheduler',
 // ── Test email ─────────────────────────────────────────────────────────────
 export const sendTestEmail = (data: { email: string; subject: string; body: string }) =>
   req<{ message: string }>('/send-test', { method: 'POST', body: JSON.stringify(data) })
+
+// ── Analytics breakdowns ────────────────────────────────────────────────────
+export type BreakdownRow = {
+  id: number
+  name: string
+  subject?: string
+  sent: number
+  opened: number
+  failed: number
+  open_rate: number
+}
+
+export const getAnalyticsByTemplate = () => req<BreakdownRow[]>('/analytics/by-template')
+export const getAnalyticsBySequence = () => req<BreakdownRow[]>('/analytics/by-sequence')
+
+// ── Prospect timeline ───────────────────────────────────────────────────────
+export type TimelineEntry = {
+  step_number: number | null
+  template_name: string
+  subject: string
+  scheduled_at: string | null
+  sent_at: string | null
+  status: string
+  opened_at: string | null
+}
+
+export const getProspectTimeline = (pid: number) =>
+  req<TimelineEntry[]>(`/prospects/${pid}/timeline`)
+
+// ── SMTP settings ───────────────────────────────────────────────────────────
+export type SmtpSettingsData = {
+  smtp_server: string
+  smtp_port: number
+  smtp_user: string
+  smtp_password: string
+  smtp_bcc: string
+  source: 'env' | 'db'
+}
+
+export const getSmtpSettings = () => req<SmtpSettingsData>('/settings/smtp')
+
+export const updateSmtpSettings = (data: Partial<SmtpSettingsData>) =>
+  req<{ message: string }>('/settings/smtp', { method: 'PUT', body: JSON.stringify(data) })
 
 // ── Error log ───────────────────────────────────────────────────────────────
 export type LogEntry = {

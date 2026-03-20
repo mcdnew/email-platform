@@ -2,15 +2,17 @@
 
 import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getQueue, deleteQueueItem } from '@/lib/api'
+import { getQueue, deleteQueueItem, patchQueueItem, getTemplates } from '@/lib/api'
+import type { ScheduledEmail } from '@/lib/types'
 import { StatusBadge } from '@/components/StatusBadge'
 import { Toast } from '@/components/Toast'
 import { useToast } from '@/hooks/useToast'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Pencil } from 'lucide-react'
 
 export default function QueuePage() {
   const qc = useQueryClient()
   const [statusFilter, setStatusFilter] = useState('')
+  const [editItem, setEditItem] = useState<ScheduledEmail | null>(null)
   const { toast, showToast } = useToast()
 
   const { data: queue, isLoading } = useQuery({ queryKey: ['queue'], queryFn: getQueue, refetchInterval: 30_000 })
@@ -18,6 +20,13 @@ export default function QueuePage() {
   const deleteMut = useMutation({
     mutationFn: deleteQueueItem,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['queue'] }); showToast('Removed from queue') },
+    onError: (e: unknown) => showToast(e instanceof Error ? e.message : String(e), 'err'),
+  })
+
+  const patchMut = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: { send_at?: string; template_id?: number } }) =>
+      patchQueueItem(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['queue'] }); setEditItem(null); showToast('Updated') },
     onError: (e: unknown) => showToast(e instanceof Error ? e.message : String(e), 'err'),
   })
 
@@ -66,10 +75,16 @@ export default function QueuePage() {
                 <td className="px-3 py-2.5"><StatusBadge status={e.status} /></td>
                 <td className="px-3 py-2.5">
                   {e.status === 'pending' && (
-                    <button onClick={() => deleteMut.mutate(e.id)}
-                      className="p-1 text-gray-300 hover:text-red-500 transition-colors">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setEditItem(e)}
+                        className="p-1 text-gray-300 hover:text-blue-500 transition-colors" title="Reschedule">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => deleteMut.mutate(e.id)}
+                        className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="Remove">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   )}
                 </td>
               </tr>
@@ -78,7 +93,80 @@ export default function QueuePage() {
         </table>
       </div>
 
+      {editItem && (
+        <EditModal
+          item={editItem}
+          onClose={() => setEditItem(null)}
+          onSave={(data) => patchMut.mutate({ id: editItem.id, data })}
+          saving={patchMut.isPending}
+        />
+      )}
+
       <Toast toast={toast} />
+    </div>
+  )
+}
+
+function EditModal({ item, onClose, onSave, saving }: {
+  item: ScheduledEmail
+  onClose: () => void
+  onSave: (data: { send_at?: string; template_id?: number }) => void
+  saving: boolean
+}) {
+  const { data: templates } = useQuery({ queryKey: ['templates'], queryFn: getTemplates })
+
+  // Convert UTC ISO string to local datetime-local input value
+  const toLocalInput = (iso: string) => {
+    const d = new Date(iso)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+
+  const [sendAt, setSendAt] = useState(toLocalInput(item.send_at))
+  const [templateId, setTemplateId] = useState<number>(item.template_id ?? 0)
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    const data: { send_at?: string; template_id?: number } = {}
+    const newIso = new Date(sendAt).toISOString()
+    if (newIso !== new Date(item.send_at).toISOString()) data.send_at = newIso
+    if (templateId && templateId !== item.template_id) data.template_id = templateId
+    if (Object.keys(data).length === 0) { onClose(); return }
+    onSave(data)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+      <form onSubmit={submit} className="bg-white dark:bg-gray-900 rounded-xl shadow-xl p-6 w-96 border border-gray-200 dark:border-gray-700">
+        <h3 className="text-sm font-semibold mb-4 dark:text-gray-100">Edit scheduled email</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+          {item.prospect_name} · {item.prospect_email}
+        </p>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Send at</label>
+            <input type="datetime-local" value={sendAt} onChange={e => setSendAt(e.target.value)} required
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Template</label>
+            <select value={templateId} onChange={e => setTemplateId(Number(e.target.value))}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100">
+              {templates?.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-5">
+          <button type="submit" disabled={saving}
+            className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+            Save
+          </button>
+          <button type="button" onClick={onClose}
+            className="py-2 px-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 text-sm rounded-lg transition-colors dark:text-gray-300">
+            Cancel
+          </button>
+        </div>
+      </form>
     </div>
   )
 }

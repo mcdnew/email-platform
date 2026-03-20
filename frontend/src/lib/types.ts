@@ -50,6 +50,7 @@ export interface ScheduledEmail {
   prospect_id: number
   prospect_name: string | null
   prospect_email: string | null
+  template_id: number | null
   template_name: string | null
   send_at: string
   sent_at: string | null
@@ -68,6 +69,7 @@ export interface SentEmail {
   template_name: string | null
   sequence_id: number | null
   sequence_name: string | null
+  click_count: number
 }
 
 export interface AnalyticsSummary {

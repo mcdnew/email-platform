@@ -1,7 +1,8 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { getAnalytics } from '@/lib/api'
+import { getAnalytics, getAnalyticsByTemplate, getAnalyticsBySequence } from '@/lib/api'
+import type { BreakdownRow } from '@/lib/api'
 import { StatusBadge } from '@/components/StatusBadge'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { TrendingUp, Mail, XCircle, Eye } from 'lucide-react'
@@ -14,10 +15,9 @@ const STAT_COLORS: Record<string, string> = {
 }
 
 export default function DashboardPage() {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['analytics'],
-    queryFn: getAnalytics,
-  })
+  const { data, isLoading, error } = useQuery({ queryKey: ['analytics'], queryFn: getAnalytics })
+  const { data: byTemplate } = useQuery({ queryKey: ['analytics-by-template'], queryFn: getAnalyticsByTemplate })
+  const { data: bySequence } = useQuery({ queryKey: ['analytics-by-sequence'], queryFn: getAnalyticsBySequence })
 
   if (isLoading) return <PageShell title="Dashboard"><div className="text-gray-500 text-sm">Loading…</div></PageShell>
   if (error || !data) return <PageShell title="Dashboard"><div className="text-red-500 text-sm">Failed to load analytics.</div></PageShell>
@@ -69,6 +69,14 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Breakdowns */}
+      {((byTemplate && byTemplate.length > 0) || (bySequence && bySequence.length > 0)) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          {byTemplate && byTemplate.length > 0 && <BreakdownTable title="By Template" rows={byTemplate} />}
+          {bySequence && bySequence.length > 0 && <BreakdownTable title="By Sequence" rows={bySequence} />}
+        </div>
+      )}
     </PageShell>
   )
 }
@@ -83,6 +91,36 @@ function StatCard({ icon: Icon, label, value, color }: {
         <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{value}</div>
         <div className="text-xs text-gray-500 mt-0.5">{label}</div>
       </div>
+    </div>
+  )
+}
+
+function BreakdownTable({ title, rows }: { title: string; rows: BreakdownRow[] }) {
+  return (
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+      <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{title}</h2>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left text-gray-400 border-b border-gray-100 dark:border-gray-800">
+            <th className="pb-2 font-medium">Name</th>
+            <th className="pb-2 font-medium text-right">Sent</th>
+            <th className="pb-2 font-medium text-right">Opened</th>
+            <th className="pb-2 font-medium text-right">Open %</th>
+            <th className="pb-2 font-medium text-right">Failed</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+          {rows.map(r => (
+            <tr key={r.id}>
+              <td className="py-1.5 text-gray-700 dark:text-gray-300 truncate max-w-[140px]">{r.name}</td>
+              <td className="py-1.5 text-right text-gray-600 dark:text-gray-400">{r.sent}</td>
+              <td className="py-1.5 text-right text-green-600 dark:text-green-400">{r.opened}</td>
+              <td className="py-1.5 text-right font-medium text-gray-900 dark:text-gray-100">{r.open_rate}%</td>
+              <td className="py-1.5 text-right text-red-500">{r.failed}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
