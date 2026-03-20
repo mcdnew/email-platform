@@ -174,7 +174,7 @@ export default function ProspectsPage() {
           <label className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 rounded-lg cursor-pointer transition-colors">
             <Upload className="w-3.5 h-3.5" />
             Import CSV
-            <input type="file" accept=".csv" className="hidden" onChange={handleCSV} />
+            <input type="file" accept=".csv" className="hidden" onChange={handleCSV} suppressHydrationWarning />
           </label>
           <button onClick={() => setShowAddForm(v => !v)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
