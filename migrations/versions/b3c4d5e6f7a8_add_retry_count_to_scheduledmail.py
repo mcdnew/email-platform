@@ -15,8 +15,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column('scheduledmail', sa.Column('retry_count', sa.Integer(), nullable=False, server_default='0'))
+    op.add_column('scheduledemail', sa.Column('retry_count', sa.Integer(), nullable=False, server_default='0'))
 
 
 def downgrade() -> None:
-    op.drop_column('scheduledmail', 'retry_count')
+    op.drop_column('scheduledemail', 'retry_count')
