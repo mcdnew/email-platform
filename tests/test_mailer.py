@@ -30,7 +30,7 @@ def test_send_email_returns_true_on_success():
             subject="Hi",
             body="<p>Hello</p>",
         )
-    assert result is True
+    assert result == "sent"
     mock_server.send_message.assert_called_once()
 
 
@@ -42,7 +42,7 @@ def test_send_email_returns_false_on_smtp_error():
             subject="Hi",
             body="<p>Hello</p>",
         )
-    assert result is False
+    assert result == "failed"
 
 
 def test_send_email_injects_tracking_pixel():

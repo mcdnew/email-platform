@@ -49,7 +49,7 @@ def test_retry_failed_resets_to_pending_and_sends(client, db):
     assert sched.status == "failed"
     assert sched.retry_count == 0
 
-    with patch("app.main.send_email", return_value=True):
+    with patch("app.main.send_email", return_value="sent"):
         resp = client.post("/retry-failed")
 
     assert resp.status_code == 200
@@ -66,7 +66,7 @@ def test_retry_failed_smtp_failure_marks_failed_again(client, db):
     """SMTP fails on retry: email goes back to failed, retry_count still incremented."""
     _, _, sched = _seed_failed(db)
 
-    with patch("app.main.send_email", return_value=False):
+    with patch("app.main.send_email", return_value="failed"):
         resp = client.post("/retry-failed")
 
     assert resp.status_code == 200
@@ -135,7 +135,7 @@ def test_retry_count_increments_each_call(client, db):
     _, _, sched = _seed_failed(db)
 
     for i in range(1, settings.MAX_RETRIES + 1):
-        with patch("app.main.send_email", return_value=False):
+        with patch("app.main.send_email", return_value="failed"):
             resp = client.post("/retry-failed")
         db.refresh(sched)
         assert sched.retry_count == i
