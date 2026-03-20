@@ -35,7 +35,7 @@ export default function SettingsPage() {
       <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-6">Settings</h1>
 
       <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mb-4">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">Scheduler</h2>
+        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">Scheduler</h2>
         <p className="text-xs text-gray-500 mb-4">Manually trigger the email send loop.</p>
         <div className="flex gap-3">
           <button
@@ -58,7 +58,7 @@ export default function SettingsPage() {
       </section>
 
       <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">Send test email</h2>
+        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">Send test email</h2>
         <p className="text-xs text-gray-500 mb-4">Send a test to verify SMTP configuration.</p>
         <form onSubmit={handleTestEmail} className="space-y-3">
           <div>
@@ -152,7 +152,7 @@ function SmtpSettingsForm() {
 
   return (
     <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mb-4">
-      <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">SMTP Configuration</h2>
+      <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">SMTP Configuration</h2>
       <p className="text-xs text-gray-500 mb-4">
         Override the server-level SMTP env vars.
         {data?.source === 'env' && <span className="ml-1 text-amber-600 dark:text-amber-400">(currently using .env defaults)</span>}
@@ -223,7 +223,7 @@ function LogViewer() {
     <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mt-4">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Activity log</h2>
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Activity log</h2>
           <p className="text-xs text-gray-500 mt-0.5">Structured JSON log from the backend (DEV_MODE only).</p>
         </div>
         <div className="flex gap-2">
