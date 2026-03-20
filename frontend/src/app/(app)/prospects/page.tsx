@@ -104,6 +104,7 @@ export default function ProspectsPage() {
           checked={table.getIsAllRowsSelected()}
           onChange={table.getToggleAllRowsSelectedHandler()}
           className="rounded"
+          suppressHydrationWarning
         />
       ),
       cell: ({ row }) => (
@@ -111,6 +112,7 @@ export default function ProspectsPage() {
           checked={row.getIsSelected()}
           onChange={row.getToggleSelectedHandler()}
           className="rounded"
+          suppressHydrationWarning
         />
       ),
     }),

@@ -33,9 +33,15 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-1">Email Platform</h1>
+    <div className="min-h-screen flex items-center justify-center bg-gray-100" style={{backgroundImage:'radial-gradient(circle,#cbd5e1 1px,transparent 1px)',backgroundSize:'28px 28px'}}>
+      <div className="w-full max-w-sm bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          </div>
+          <span className="font-semibold text-gray-900">Email Platform</span>
+        </div>
+        <h1 className="text-xl font-semibold text-gray-900 mb-1">Sign in</h1>
         <p className="text-sm text-gray-500 mb-6">Enter your API key to continue</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
