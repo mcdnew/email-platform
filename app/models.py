@@ -42,10 +42,11 @@ class ScheduledEmail(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     prospect_id: int = Field(foreign_key="prospect.id")
     template_id: int = Field(foreign_key="emailtemplate.id")
-    sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")  # ✅ Add this line
+    sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")
     send_at: datetime
     sent_at: Optional[datetime] = None
     status: str = "pending"
+    retry_count: int = Field(default=0)
 
 class SentEmail(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)

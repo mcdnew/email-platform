@@ -259,6 +259,48 @@ def force_scheduler(db: Session = Depends(get_session)):
     return {"message": f"FORCE scheduler: {result}"}
 
 
+@app.post("/retry-failed", dependencies=[Depends(require_api_key)])
+def retry_failed(db: Session = Depends(get_session)):
+    """
+    Reset transient failed emails to pending and immediately run the scheduler.
+
+    Skips permanently failed emails:
+      - prospect deleted or template deleted
+      - prospect is unsubscribed
+
+    Each call increments retry_count. Emails that have reached MAX_RETRIES
+    are not retried again.
+    """
+    candidates = db.exec(
+        select(ScheduledEmail).where(
+            ScheduledEmail.status == "failed",
+            ScheduledEmail.retry_count < settings.MAX_RETRIES,
+        )
+    ).all()
+
+    retried = 0
+    for sched in candidates:
+        prospect = db.get(Prospect, sched.prospect_id)
+        template = db.get(EmailTemplate, sched.template_id)
+        # Skip permanently failed cases — no point retrying
+        if not (prospect and template) or prospect.unsubscribed:
+            continue
+        sched.status = "pending"
+        sched.retry_count += 1
+        sched.send_at = _now()
+        sched.sent_at = None  # allow _process_emails to re-claim this row
+        db.add(sched)
+        retried += 1
+
+    db.commit()
+
+    if retried == 0:
+        return {"message": "no retryable emails found", "retried": 0}
+
+    result = _process_emails(db, enforce_limits=False)
+    return {"message": f"retried {retried}: {result}", "retried": retried}
+
+
 # ────────────── Scheduled-Email API for the UI ──────────────
 @app.get("/scheduled-emails", dependencies=[Depends(require_api_key)])
 def list_scheduled(db: Session = Depends(get_session)):
