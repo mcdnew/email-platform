@@ -77,11 +77,11 @@ export default function QueuePage() {
                   {e.status === 'pending' && (
                     <div className="flex items-center gap-1">
                       <button onClick={() => setEditItem(e)}
-                        className="p-1 text-gray-300 hover:text-blue-500 transition-colors" title="Reschedule">
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-300 hover:text-blue-500 transition-colors" title="Reschedule">
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                       <button onClick={() => deleteMut.mutate(e.id)}
-                        className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="Remove">
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-300 hover:text-red-500 transition-colors" title="Remove">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>

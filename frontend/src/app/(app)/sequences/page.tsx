@@ -186,7 +186,7 @@ function SortableStep({ step, index, templateName, onDelete }: {
           <div className="text-xs text-gray-400">Day {step.delay_days}</div>
         </div>
       </div>
-      <button onClick={onDelete} className="p-1 text-gray-300 hover:text-red-500 transition-colors">
+      <button onClick={onDelete} className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-300 hover:text-red-500 transition-colors">
         <Trash2 className="w-3.5 h-3.5" />
       </button>
     </div>

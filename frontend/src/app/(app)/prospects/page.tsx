@@ -170,11 +170,11 @@ export default function ProspectsPage() {
           <button
             title={row.original.unsubscribed ? 'Resubscribe' : 'Unsubscribe'}
             onClick={() => toggleUnsubMut.mutate({ id: row.original.id, unsubscribed: !row.original.unsubscribed })}
-            className={`p-1 transition-colors ${row.original.unsubscribed ? 'text-red-400 hover:text-gray-500' : 'text-gray-400 hover:text-red-500'}`}>
+            className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${row.original.unsubscribed ? 'text-red-400 hover:text-gray-500' : 'text-gray-400 hover:text-red-500'}`}>
             <UserX className="w-3.5 h-3.5" />
           </button>
           <button onClick={() => deleteMut.mutate(row.original.id)}
-            className="p-1 text-gray-400 hover:text-red-600 transition-colors">
+            className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:text-red-600 transition-colors">
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
