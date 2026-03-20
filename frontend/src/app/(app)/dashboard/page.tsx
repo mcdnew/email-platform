@@ -31,14 +31,14 @@ export default function DashboardPage() {
   return (
     <PageShell title="Dashboard">
       {/* Stat cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <StatCard icon={Mail} label="Total Sent" value={data.total_sent} color="blue" />
         <StatCard icon={TrendingUp} label="Open Rate" value={`${data.open_rate}%`} color="green" />
         <StatCard icon={XCircle} label="Failed" value={data.total_failed} color="red" />
         <StatCard icon={Eye} label="Sent Today" value={data.sent_today} color="purple" />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Chart */}
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <h2 className="text-sm font-medium text-gray-700 mb-4">Email Status Overview</h2>
