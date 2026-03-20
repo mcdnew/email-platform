@@ -22,9 +22,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)
 if [ ! -f "$SCRIPT_DIR/docker-compose.yml" ]; then
   heading "Downloading email-platform..."
   command -v curl >/dev/null 2>&1 || error "curl is required. Install it and re-run."
-  curl -fsSL https://github.com/mcdnew/email-platform/archive/refs/heads/main.zip -o /tmp/email-platform.zip
   command -v unzip >/dev/null 2>&1 || error "unzip is required. Install it (e.g. apt install unzip) and re-run."
+  curl -fsSL https://github.com/mcdnew/email-platform/archive/refs/heads/main.zip -o /tmp/email-platform.zip
+  rm -rf /tmp/email-platform-extract
   unzip -q /tmp/email-platform.zip -d /tmp/email-platform-extract
+  rm -rf email-platform
   mv /tmp/email-platform-extract/email-platform-main email-platform
   rm -rf /tmp/email-platform.zip /tmp/email-platform-extract
   cd email-platform
