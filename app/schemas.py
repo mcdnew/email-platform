@@ -71,6 +71,25 @@ class ProspectImport(BaseModel):
     company: Optional[str] = None
     title: Optional[str] = None
 
+# --- Business card upsert (from mobile app) ---
+class BusinessCardUpsert(BaseModel):
+    name: str
+    email: str
+    phone: Optional[str] = None
+    company: Optional[str] = None
+    title: Optional[str] = None
+    website: Optional[str] = None
+    address: Optional[str] = None
+    linkedin: Optional[str] = None
+    tags: Optional[List[str]] = None        # app sends list, we store as JSON string
+    notes: Optional[str] = None
+    voice_note: Optional[str] = None        # single transcription text from app
+    scanned_at: Optional[str] = None        # ISO datetime string
+
+class BusinessCardUpsertResponse(BaseModel):
+    id: int
+    action: str   # "created" or "updated"
+
 # --- Sequence step reorder ---
 class StepReorderItem(BaseModel):
     step_id: int

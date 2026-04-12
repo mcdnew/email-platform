@@ -19,6 +19,17 @@ class Prospect(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     unsubscribed: bool = Field(default=False)
 
+    # Business card fields
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    address: Optional[str] = None
+    linkedin: Optional[str] = None
+    tags: Optional[str] = None           # JSON array stored as string e.g. '["fordaq","personal"]'
+    notes: Optional[str] = None
+    voice_notes: Optional[str] = None    # JSON array: [{"text": "...", "recorded_at": "..."}]
+    card_image_path: Optional[str] = None
+    scanned_at: Optional[datetime] = None
+
 class EmailTemplate(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str

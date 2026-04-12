@@ -1,15 +1,18 @@
 # app/main.py
 
+import io
 import json
 import os
 import logging
+import shutil
+import uuid
 from datetime import datetime, date, time
 from typing import List, Optional
 
 import pytz
-from fastapi import FastAPI, HTTPException, Depends, Request, Security, status
+from fastapi import FastAPI, HTTPException, Depends, Request, Security, status, UploadFile, File
 from pydantic import BaseModel
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.security.api_key import APIKeyHeader
 from sqlmodel import Session, select, update
 from sqlalchemy import func, delete
@@ -22,7 +25,7 @@ from app.models import (
 )
 from app.schemas import (
     AssignSequenceRequest, SequenceCreate, SequenceRead, TestEmailRequest,
-    ProspectImport, StepReorderRequest,
+    ProspectImport, StepReorderRequest, BusinessCardUpsert, BusinessCardUpsertResponse,
 )
 from app.mailer import send_email
 from app.config import settings
@@ -977,6 +980,216 @@ def update_smtp_settings(payload: SmtpSettingsPayload, db: Session = Depends(get
     db.commit()
     logger.info("smtp_settings_updated", extra={"user": row.smtp_user})
     return {"message": "SMTP settings saved"}
+
+
+# ────────────── Business Card API (mobile app) ──────────────
+
+CARD_IMAGES_DIR = os.getenv("CARD_IMAGES_DIR", "card_images")
+
+@app.post("/prospects/upsert", response_model=BusinessCardUpsertResponse, dependencies=[Depends(require_api_key)])
+def upsert_prospect(data: BusinessCardUpsert, db: Session = Depends(get_session)):
+    """
+    Create or update a prospect by email (upsert).
+    - New email → create prospect, return action="created"
+    - Existing email → merge fields, append voice note, return action="updated"
+    """
+    existing = db.exec(select(Prospect).where(Prospect.email == data.email)).first()
+
+    # Merge voice note into existing JSON array
+    voice_notes_list = []
+    if existing and existing.voice_notes:
+        try:
+            voice_notes_list = json.loads(existing.voice_notes)
+        except (json.JSONDecodeError, TypeError):
+            voice_notes_list = []
+    if data.voice_note:
+        voice_notes_list.append({
+            "text": data.voice_note,
+            "recorded_at": data.scanned_at or datetime.utcnow().isoformat(),
+        })
+
+    tags_str = json.dumps(data.tags) if data.tags else (existing.tags if existing else None)
+
+    if existing:
+        # Merge: only overwrite with non-empty values from the new scan
+        if data.name:       existing.name    = data.name
+        if data.phone:      existing.phone   = data.phone
+        if data.company:    existing.company = data.company
+        if data.title:      existing.title   = data.title
+        if data.website:    existing.website = data.website
+        if data.address:    existing.address = data.address
+        if data.linkedin:   existing.linkedin = data.linkedin
+        if data.notes:
+            existing.notes = f"{existing.notes}\n---\n{data.notes}" if existing.notes else data.notes
+        if tags_str:        existing.tags    = tags_str
+        if voice_notes_list:
+            existing.voice_notes = json.dumps(voice_notes_list)
+        if data.scanned_at:
+            existing.scanned_at = datetime.fromisoformat(data.scanned_at)
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        logger.info("prospect_upserted", extra={"action": "updated", "email": data.email, "id": existing.id})
+        return {"id": existing.id, "action": "updated"}
+    else:
+        prospect = Prospect(
+            name=data.name,
+            email=data.email,
+            phone=data.phone,
+            company=data.company,
+            title=data.title,
+            website=data.website,
+            address=data.address,
+            linkedin=data.linkedin,
+            tags=tags_str,
+            notes=data.notes,
+            voice_notes=json.dumps(voice_notes_list) if voice_notes_list else None,
+            scanned_at=datetime.fromisoformat(data.scanned_at) if data.scanned_at else datetime.utcnow(),
+        )
+        db.add(prospect)
+        db.commit()
+        db.refresh(prospect)
+        logger.info("prospect_upserted", extra={"action": "created", "email": data.email, "id": prospect.id})
+        return {"id": prospect.id, "action": "created"}
+
+
+@app.post("/prospects/{pid}/card-image", dependencies=[Depends(require_api_key)])
+async def upload_card_image(pid: int, file: UploadFile = File(...), db: Session = Depends(get_session)):
+    """Upload a business card image and associate it with a prospect."""
+    prospect = db.get(Prospect, pid)
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Prospect not found")
+
+    os.makedirs(CARD_IMAGES_DIR, exist_ok=True)
+
+    ext = os.path.splitext(file.filename or "card.jpg")[1] or ".jpg"
+    filename = f"{pid}_{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join(CARD_IMAGES_DIR, filename)
+
+    with open(filepath, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    prospect.card_image_path = filepath
+    db.add(prospect)
+    db.commit()
+
+    return {"path": filepath}
+
+
+@app.get("/binder/pdf", dependencies=[Depends(require_api_key)])
+def generate_binder_pdf(tag: Optional[str] = None, db: Session = Depends(get_session)):
+    """
+    Generate a PDF binder of business cards.
+    Layout: A4, 2 columns × 8 rows = 16 cards per page.
+    Each cell shows the card image (if available) + name + company + tags.
+    Optional ?tag=fordaq to filter by tag.
+    """
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import cm
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image as RLImage, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER
+    except ImportError:
+        raise HTTPException(status_code=500, detail="reportlab is not installed. Run: pip install reportlab")
+
+    # Fetch prospects, optionally filtered by tag
+    prospects = db.exec(select(Prospect).order_by(Prospect.name)).all()
+    if tag:
+        filtered = []
+        for p in prospects:
+            if p.tags:
+                try:
+                    if tag in json.loads(p.tags):
+                        filtered.append(p)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        prospects = filtered
+
+    if not prospects:
+        raise HTTPException(status_code=404, detail="No prospects found" + (f" with tag '{tag}'" if tag else ""))
+
+    styles = getSampleStyleSheet()
+    name_style = ParagraphStyle("name", fontSize=9, fontName="Helvetica-Bold", alignment=TA_CENTER, leading=12)
+    detail_style = ParagraphStyle("detail", fontSize=7, fontName="Helvetica", alignment=TA_CENTER, textColor=colors.HexColor("#555555"), leading=10)
+    tag_style = ParagraphStyle("tag", fontSize=6, fontName="Helvetica", alignment=TA_CENTER, textColor=colors.HexColor("#888888"), leading=9)
+
+    COLS = 2
+    ROWS = 8
+    PAGE_SIZE = A4
+    page_w, page_h = PAGE_SIZE
+    margin = 1.5 * cm
+    col_w = (page_w - 2 * margin) / COLS
+    row_h = (page_h - 2 * margin) / ROWS
+    img_h = row_h * 0.55
+
+    def make_cell(prospect: Prospect):
+        cell_content = []
+
+        # Card image
+        if prospect.card_image_path and os.path.exists(prospect.card_image_path):
+            try:
+                img = RLImage(prospect.card_image_path, width=col_w - 0.6 * cm, height=img_h)
+                cell_content.append(img)
+            except Exception:
+                pass
+
+        cell_content.append(Paragraph(prospect.name or "Unknown", name_style))
+        if prospect.company:
+            cell_content.append(Paragraph(prospect.company, detail_style))
+        if prospect.title:
+            cell_content.append(Paragraph(prospect.title, detail_style))
+        if prospect.tags:
+            try:
+                tag_list = json.loads(prospect.tags)
+                if tag_list:
+                    cell_content.append(Paragraph(" · ".join(tag_list), tag_style))
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return cell_content
+
+    # Build rows of 2
+    table_data = []
+    for i in range(0, len(prospects), COLS):
+        row = []
+        for j in range(COLS):
+            idx = i + j
+            row.append(make_cell(prospects[idx]) if idx < len(prospects) else "")
+        table_data.append(row)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=PAGE_SIZE,
+        leftMargin=margin, rightMargin=margin,
+        topMargin=margin, bottomMargin=margin,
+        title="Business Card Binder",
+    )
+
+    table = Table(table_data, colWidths=[col_w] * COLS, rowHeights=[row_h] * len(table_data))
+    table.setStyle(TableStyle([
+        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
+        ("BOX",          (0, 0), (-1, -1), 0.5, colors.HexColor("#dddddd")),
+        ("INNERGRID",    (0, 0), (-1, -1), 0.5, colors.HexColor("#dddddd")),
+        ("BACKGROUND",   (0, 0), (-1, -1), colors.white),
+        ("TOPPADDING",   (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+
+    doc.build([table])
+    buf.seek(0)
+
+    tag_label = f"_{tag}" if tag else ""
+    filename = f"binder{tag_label}_{date.today().isoformat()}.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ────────────── CLI Entrypoint ──────────────
