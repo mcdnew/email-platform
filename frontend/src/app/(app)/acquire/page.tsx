@@ -1,7 +1,8 @@
 'use client'
 
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getActivityEvents, getConversations, getLeadCaptures, getProspects, reviewLeadCapture } from '@/lib/api'
+import { getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, handoffOutreachToNurture, reviewLeadCapture } from '@/lib/api'
 
 function parseJson(value: string | null): Record<string, unknown> {
   if (!value) return {}
@@ -14,6 +15,7 @@ function parseJson(value: string | null): Record<string, unknown> {
 
 export default function AcquirePage() {
   const qc = useQueryClient()
+  const [selectedSequences, setSelectedSequences] = useState<Record<number, string>>({})
   const { data: pendingCaptures, isLoading: capturesLoading } = useQuery({
     queryKey: ['lead-captures', 'pending_review'],
     queryFn: () => getLeadCaptures({ review_status: 'pending_review', source_type: 'web_discovery' }),
@@ -30,6 +32,10 @@ export default function AcquirePage() {
     queryKey: ['conversations', 'gmail'],
     queryFn: () => getConversations({ channel: 'gmail', limit: 8 }),
   })
+  const { data: sequences, isLoading: sequencesLoading } = useQuery({
+    queryKey: ['sequences'],
+    queryFn: getSequences,
+  })
 
   const reviewMutation = useMutation({
     mutationFn: ({ id, review_status }: { id: number; review_status: 'approved' | 'rejected' }) =>
@@ -38,6 +44,21 @@ export default function AcquirePage() {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['lead-captures'] }),
         qc.invalidateQueries({ queryKey: ['prospects'] }),
+      ])
+    },
+  })
+  const handoffMutation = useMutation({
+    mutationFn: ({ prospectId, sequenceId }: { prospectId: number; sequenceId: number }) =>
+      handoffOutreachToNurture({
+        prospect_id: prospectId,
+        campaign_key: 'acquire:manual-handoff',
+        sequence_id: sequenceId,
+        qualified: true,
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['prospects'] }),
+        qc.invalidateQueries({ queryKey: ['activity-events'] }),
       ])
     },
   })
@@ -124,6 +145,30 @@ export default function AcquirePage() {
                   </div>
                   <div className="mt-2 text-[11px] uppercase tracking-wide text-amber-600 dark:text-amber-400">
                     {prospect.lifecycle_stage || 'interested'}
+                  </div>
+                  <div className="mt-3 flex flex-col sm:flex-row gap-2">
+                    <select
+                      value={selectedSequences[prospect.id] ?? ''}
+                      onChange={(e) => setSelectedSequences((current) => ({ ...current, [prospect.id]: e.target.value }))}
+                      className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                      disabled={sequencesLoading}
+                    >
+                      <option value="">Select nurture sequence…</option>
+                      {sequences?.map((sequence) => (
+                        <option key={sequence.id} value={sequence.id}>{sequence.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => {
+                        const sequenceId = Number(selectedSequences[prospect.id] ?? '')
+                        if (!sequenceId) return
+                        handoffMutation.mutate({ prospectId: prospect.id, sequenceId })
+                      }}
+                      className="px-3 py-2 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                      disabled={handoffMutation.isPending || !selectedSequences[prospect.id]}
+                    >
+                      Hand off to nurture
+                    </button>
                   </div>
                 </div>
               ))}

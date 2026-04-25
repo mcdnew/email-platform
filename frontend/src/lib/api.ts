@@ -192,3 +192,19 @@ export const getActivityEvents = (params: { source_module?: string; event_type?:
 
 export const getConversations = (params: { channel?: string; state?: string; campaign_key?: string; limit?: number }) =>
   req<Conversation[]>(`/conversations${buildQs(params)}`)
+
+export const handoffOutreachToNurture = (data: {
+  prospect_id: number
+  campaign_key: string
+  sequence_id: number
+  qualified?: boolean
+  start_date?: string
+  ventilate_days?: number
+  notes?: string
+}) => req<{ message: string; prospect_id: number; sequence_id: number; lifecycle_stage: string }>(
+  '/integrations/outreach/handoffs/nurture',
+  {
+    method: 'POST',
+    body: JSON.stringify(data),
+  },
+)
