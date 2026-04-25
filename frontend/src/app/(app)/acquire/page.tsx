@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, handoffOutreachToNurture, reviewLeadCapture } from '@/lib/api'
+import { getAcquisitionCampaignSummaries, getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, handoffOutreachToNurture, reviewLeadCapture } from '@/lib/api'
 
 function parseJson(value: string | null): Record<string, unknown> {
   if (!value) return {}
@@ -32,6 +32,10 @@ export default function AcquirePage() {
   const { data: gmailConversations, isLoading: conversationsLoading } = useQuery({
     queryKey: ['conversations', 'gmail'],
     queryFn: () => getConversations({ channel: 'gmail', limit: 8 }),
+  })
+  const { data: campaignSummaries, isLoading: campaignSummariesLoading } = useQuery({
+    queryKey: ['acquisition-campaign-summaries'],
+    queryFn: getAcquisitionCampaignSummaries,
   })
   const { data: sequences, isLoading: sequencesLoading } = useQuery({
     queryKey: ['sequences'],
@@ -72,6 +76,32 @@ export default function AcquirePage() {
           Pending discovered leads and high-signal outreach contacts now owned by the core platform.
         </p>
       </div>
+
+      <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">Campaign Summary</h2>
+          <span className="text-xs text-gray-400">{campaignSummaries?.length ?? 0} campaigns</span>
+        </div>
+        {campaignSummariesLoading ? (
+          <p className="text-sm text-gray-500">Loading…</p>
+        ) : !campaignSummaries?.length ? (
+          <p className="text-sm text-gray-500">No mirrored acquisition campaigns yet.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {campaignSummaries.map((summary) => (
+              <div key={summary.campaign_key} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
+                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{summary.campaign_key}</div>
+                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500">
+                  <span>Pending review</span><span className="text-right">{summary.pending_review}</span>
+                  <span>Interested</span><span className="text-right">{summary.interested}</span>
+                  <span>Conversations</span><span className="text-right">{summary.conversations}</span>
+                  <span>Events</span><span className="text-right">{summary.recent_events}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">

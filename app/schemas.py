@@ -211,3 +211,11 @@ class ConversationRead(BaseModel):
 class ProspectLifecycleActionRequest(BaseModel):
     target_stage: str
     notes: Optional[str] = None
+
+
+class AcquisitionCampaignSummaryRead(BaseModel):
+    campaign_key: str
+    pending_review: int
+    interested: int
+    conversations: int
+    recent_events: int

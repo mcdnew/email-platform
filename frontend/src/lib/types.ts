@@ -50,6 +50,14 @@ export interface Conversation {
   last_message_at: string | null
 }
 
+export interface AcquisitionCampaignSummary {
+  campaign_key: string
+  pending_review: number
+  interested: number
+  conversations: number
+  recent_events: number
+}
+
 export interface ProspectCreate {
   name: string
   email: string

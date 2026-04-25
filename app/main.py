@@ -31,6 +31,7 @@ from app.schemas import (
     OutreachMessageSentRequest, OutreachReplyIngestRequest, OutreachNurtureHandoffRequest,
     LeadCaptureReviewRequest, LeadCaptureRead, ActivityEventRead, ConversationRead,
     ProspectLifecycleActionRequest,
+    AcquisitionCampaignSummaryRead,
 )
 from app.mailer import send_email
 from app.config import settings
@@ -1783,6 +1784,61 @@ def update_prospect_lifecycle(pid: int, payload: ProspectLifecycleActionRequest,
     )
     db.commit()
     return {"message": "lifecycle updated", "prospect_id": prospect.id, "lifecycle_stage": prospect.lifecycle_stage}
+
+
+@app.get("/acquire/campaigns/summary", response_model=List[AcquisitionCampaignSummaryRead], dependencies=[Depends(require_api_key)])
+def acquisition_campaign_summary(db: Session = Depends(get_session)):
+    keys = set()
+    for model, attr in (
+        (LeadCapture, LeadCapture.external_ref),
+        (ActivityEvent, ActivityEvent.campaign_key),
+        (Conversation, Conversation.campaign_key),
+    ):
+        rows = db.exec(select(attr)).all()
+        for row in rows:
+            if not row:
+                continue
+            if model is LeadCapture:
+                text = str(row)
+                if ":" in text:
+                    keys.add(text.rsplit(":", 1)[0])
+            else:
+                keys.add(str(row))
+
+    summaries: list[AcquisitionCampaignSummaryRead] = []
+    for key in sorted(keys):
+        pending_review = _scalar(
+            db,
+            select(func.count()).select_from(LeadCapture).where(
+                LeadCapture.review_status == "pending_review",
+                LeadCapture.external_ref.like(f"{key}:%"),
+            ),
+        )
+        interested = _scalar(
+            db,
+            select(func.count()).select_from(Prospect).where(
+                Prospect.lifecycle_stage == "interested",
+                Prospect.source_ref.like(f"{key}:%"),
+            ),
+        )
+        conversations = _scalar(
+            db,
+            select(func.count()).select_from(Conversation).where(Conversation.campaign_key == key),
+        )
+        recent_events = _scalar(
+            db,
+            select(func.count()).select_from(ActivityEvent).where(ActivityEvent.campaign_key == key),
+        )
+        summaries.append(
+            AcquisitionCampaignSummaryRead(
+                campaign_key=key,
+                pending_review=pending_review,
+                interested=interested,
+                conversations=conversations,
+                recent_events=recent_events,
+            )
+        )
+    return summaries
 
 
 @app.get("/export/contacts", dependencies=[Depends(require_api_key)])

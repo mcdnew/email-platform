@@ -451,3 +451,66 @@ def test_activity_events_and_conversations_list_endpoints(client, db):
     conversations = conv_resp.json()
     assert len(conversations) == 1
     assert conversations[0]["provider_thread_id"] == "thread-abc"
+
+
+def test_prospect_lifecycle_action_updates_stage_and_closes_conversations(client, db):
+    prospect = Prospect(name="Lifecycle User", email="life@example.com", lifecycle_stage="interested")
+    db.add(prospect)
+    db.commit()
+    db.refresh(prospect)
+
+    conversation = Conversation(
+        prospect_id=prospect.id,
+        campaign_key="acquire:lumber",
+        channel="gmail",
+        provider_thread_id="thread-life",
+        state="waiting_on_us",
+    )
+    db.add(conversation)
+    db.commit()
+
+    qualify_resp = client.post(
+        f"/prospects/{prospect.id}/lifecycle",
+        json={"target_stage": "qualified", "notes": "Sales-ready"},
+    )
+    assert qualify_resp.status_code == 200
+    db.refresh(prospect)
+    assert prospect.lifecycle_stage == "qualified"
+    assert prospect.qualified_at is not None
+    assert "Sales-ready" in (prospect.notes or "")
+
+    lost_resp = client.post(
+        f"/prospects/{prospect.id}/lifecycle",
+        json={"target_stage": "lost"},
+    )
+    assert lost_resp.status_code == 200
+    db.refresh(prospect)
+    assert prospect.lifecycle_stage == "lost"
+
+    db.refresh(conversation)
+    assert conversation.state == "closed"
+
+
+def test_acquisition_campaign_summary_aggregates_core_records(client, db):
+    p1 = Prospect(name="One", email="one@example.com", lifecycle_stage="interested", source_ref="acquire:lumber:1")
+    p2 = Prospect(name="Two", email="two@example.com", lifecycle_stage="ready_for_outreach", source_ref="acquire:lumber:2")
+    db.add(p1)
+    db.add(p2)
+    db.commit()
+    db.refresh(p1)
+    db.refresh(p2)
+
+    db.add(LeadCapture(source_type="web_discovery", review_status="pending_review", external_ref="acquire:lumber:1"))
+    db.add(ActivityEvent(prospect_id=p1.id, campaign_key="acquire:lumber", event_type="acquire.reply_received", source_module="acquire"))
+    db.add(Conversation(prospect_id=p1.id, campaign_key="acquire:lumber", channel="gmail", provider_thread_id="thread-1", state="waiting_on_us"))
+    db.commit()
+
+    resp = client.get("/acquire/campaigns/summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["campaign_key"] == "acquire:lumber"
+    assert data[0]["pending_review"] == 1
+    assert data[0]["interested"] == 1
+    assert data[0]["conversations"] == 1
+    assert data[0]["recent_events"] == 1
