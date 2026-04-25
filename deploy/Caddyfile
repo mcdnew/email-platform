@@ -1,0 +1,17 @@
+{$PUBLIC_HOST} {
+    encode gzip zstd
+
+    @backend_public path /unsubscribe* /track_open* /track_click* /integrations/*
+    handle @backend_public {
+        reverse_proxy backend:8000
+    }
+
+    @backend_prefixed path /api/core/*
+    handle_path @backend_prefixed {
+        reverse_proxy backend:8000
+    }
+
+    handle {
+        reverse_proxy frontend:3000
+    }
+}

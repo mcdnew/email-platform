@@ -16,6 +16,7 @@ The main deployment entrypoint is now the core repo:
 
 It currently runs:
 
+- `proxy`
 - `db`
 - `backend`
 - `frontend`
@@ -32,6 +33,8 @@ for local/server deployment as long as both repos are present side by side.
 
 ```bash
 cd /home/claudiu/projects/email-platform
+cp .env.example .env
+cp worker.env.example worker.env
 docker compose up --build
 ```
 
@@ -45,10 +48,11 @@ For the current compose file to work:
   outreach-bot/
 ```
 
-The worker service currently mounts:
+The worker source is still built from `../outreach-bot`, but its runtime data is
+now centralized into this repo:
 
-- `../outreach-bot/campaigns`
-- `../outreach-bot/outreach.db`
+- `./worker-data/campaigns`
+- `./worker-data/outreach.db`
 
 This preserves current worker behavior while the migration is still in progress.
 
@@ -57,18 +61,16 @@ This preserves current worker behavior while the migration is still in progress.
 Core repo:
 
 - `.env` in `email-platform`
-
-Worker repo:
-
-- `.env` in `outreach-bot`
+- `worker.env` in `email-platform`
 
 Important shared values:
 
 - `API_KEY`
 - `UNSUBSCRIBE_SECRET`
 - `CORE_PLATFORM_PUBLIC_URL`
+- `PUBLIC_HOST`
 
-Worker-specific env remains in its own `.env` for now:
+Worker-specific env is now expected in `worker.env` in the core repo:
 
 - Anthropic credentials
 - Gmail OAuth client settings
@@ -80,9 +82,10 @@ Cloudflare should point at the unified platform domain.
 
 Target behavior:
 
-- public web app: frontend
-- API: backend
+- public web app: frontend through `proxy`
+- API paths for mobile or backend-facing external use: `/api/core/*`
 - unsubscribe links from worker emails: core backend `/unsubscribe`
+- tracking links: core backend `/track_open` and `/track_click`
 
 This is already partially supported:
 
@@ -93,9 +96,8 @@ This is already partially supported:
 
 1. Worker source is still in a separate repo.
 2. Worker local SQLite is still mounted and still holds runtime truth for some concerns.
-3. Worker `.env` is still separate.
-4. Worker Flask UI is not yet folded into the main frontend.
-5. The outreach repo has no configured Git remote in the current local checkout.
+3. Worker Flask UI is not yet folded into the main frontend.
+4. Reverse-proxy config is present, but not yet validated in a live end-to-end Cloudflare deployment.
 
 ## Next Deployment Steps
 

@@ -1,4 +1,20 @@
 services:
+  proxy:
+    image: caddy:2
+    restart: always
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
   db:
     image: postgres:15
     restart: always
@@ -16,8 +32,6 @@ services:
     restart: always
     depends_on:
       - db
-    ports:
-      - "8000:8000"
     env_file:
       - .env
     environment:
@@ -35,15 +49,16 @@ services:
     depends_on:
       - backend
     env_file:
-      - ../outreach-bot/.env
+      - ./worker.env
     environment:
       CORE_PLATFORM_URL: "http://backend:8000"
       CORE_PLATFORM_PUBLIC_URL: ${CORE_PLATFORM_PUBLIC_URL:-}
       CORE_PLATFORM_API_KEY: ${API_KEY}
       UNSUBSCRIBE_SECRET: ${UNSUBSCRIBE_SECRET}
+      OUTREACH_DB_PATH: /data/outreach.db
+      CAMPAIGNS_DIR: /data/campaigns
     volumes:
-      - ../outreach-bot/campaigns:/app/campaigns
-      - ../outreach-bot/outreach.db:/app/outreach.db
+      - ./worker-data:/data
       - worker_state:/root/.config/hailing
 
   frontend:
@@ -53,13 +68,13 @@ services:
     restart: always
     depends_on:
       - backend
-    ports:
-      - "3000:3000"
     environment:
       API_URL: "http://backend:8000"
       NODE_ENV: "production"
 
 volumes:
+  caddy_data:
+  caddy_config:
   db_data:
   card_images:
   voice_notes:
