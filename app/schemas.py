@@ -184,3 +184,25 @@ class LeadCaptureRead(BaseModel):
     external_ref: Optional[str] = None
     created_at: datetime
     reviewed_at: Optional[datetime] = None
+
+
+class ActivityEventRead(BaseModel):
+    id: int
+    prospect_id: Optional[int] = None
+    sequence_id: Optional[int] = None
+    campaign_key: Optional[str] = None
+    event_type: str
+    source_module: str
+    payload_json: Optional[str] = None
+    created_at: datetime
+
+
+class ConversationRead(BaseModel):
+    id: int
+    prospect_id: int
+    campaign_key: Optional[str] = None
+    channel: str
+    provider_thread_id: Optional[str] = None
+    state: str
+    opened_at: datetime
+    last_message_at: Optional[datetime] = None

@@ -414,3 +414,40 @@ def test_lead_capture_review_queue_and_approval(client, db):
     assert prospect is not None
     assert prospect.lifecycle_stage == "ready_for_outreach"
     assert "Operator approved" in (prospect.notes or "")
+
+
+def test_activity_events_and_conversations_list_endpoints(client, db):
+    prospect = Prospect(name="Event User", email="event@example.com", lifecycle_stage="interested")
+    db.add(prospect)
+    db.commit()
+    db.refresh(prospect)
+
+    event = ActivityEvent(
+        prospect_id=prospect.id,
+        campaign_key="acquire:lumber",
+        event_type="acquire.reply_received",
+        source_module="acquire",
+        payload_json='{"intent":"INTERESTED"}',
+    )
+    conversation = Conversation(
+        prospect_id=prospect.id,
+        campaign_key="acquire:lumber",
+        channel="gmail",
+        provider_thread_id="thread-abc",
+        state="waiting_on_us",
+    )
+    db.add(event)
+    db.add(conversation)
+    db.commit()
+
+    events_resp = client.get("/activity-events?source_module=acquire&campaign_key=acquire:lumber")
+    assert events_resp.status_code == 200
+    events = events_resp.json()
+    assert len(events) == 1
+    assert events[0]["event_type"] == "acquire.reply_received"
+
+    conv_resp = client.get("/conversations?channel=gmail&state=waiting_on_us")
+    assert conv_resp.status_code == 200
+    conversations = conv_resp.json()
+    assert len(conversations) == 1
+    assert conversations[0]["provider_thread_id"] == "thread-abc"

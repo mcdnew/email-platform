@@ -4,6 +4,7 @@
 import type {
   Prospect, ProspectCreate, EmailTemplate, Sequence, SequenceStep,
   ScheduledEmail, SentEmail, AnalyticsSummary, PaginatedResponse, BulkImportResult, LeadCapture,
+  ActivityEvent, Conversation,
 } from './types'
 
 async function req<T>(
@@ -185,3 +186,9 @@ export const reviewLeadCapture = (id: number, data: { review_status: 'approved' 
     method: 'POST',
     body: JSON.stringify(data),
   })
+
+export const getActivityEvents = (params: { source_module?: string; event_type?: string; prospect_id?: number; campaign_key?: string; limit?: number }) =>
+  req<ActivityEvent[]>(`/activity-events${buildQs(params)}`)
+
+export const getConversations = (params: { channel?: string; state?: string; campaign_key?: string; limit?: number }) =>
+  req<Conversation[]>(`/conversations${buildQs(params)}`)

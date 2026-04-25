@@ -28,6 +28,28 @@ export interface LeadCapture {
   reviewed_at: string | null
 }
 
+export interface ActivityEvent {
+  id: number
+  prospect_id: number | null
+  sequence_id: number | null
+  campaign_key: string | null
+  event_type: string
+  source_module: string
+  payload_json: string | null
+  created_at: string
+}
+
+export interface Conversation {
+  id: number
+  prospect_id: number
+  campaign_key: string | null
+  channel: string
+  provider_thread_id: string | null
+  state: string
+  opened_at: string
+  last_message_at: string | null
+}
+
 export interface ProspectCreate {
   name: string
   email: string

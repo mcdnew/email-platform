@@ -29,7 +29,7 @@ from app.schemas import (
     ProspectImport, StepReorderRequest, BusinessCardUpsert, BusinessCardUpsertResponse,
     OutreachDiscoveryIngestRequest, OutreachDiscoveryIngestResponse, OutreachDiscoveryResultItem,
     OutreachMessageSentRequest, OutreachReplyIngestRequest, OutreachNurtureHandoffRequest,
-    LeadCaptureReviewRequest, LeadCaptureRead,
+    LeadCaptureReviewRequest, LeadCaptureRead, ActivityEventRead, ConversationRead,
 )
 from app.mailer import send_email
 from app.config import settings
@@ -1700,6 +1700,47 @@ def review_lead_capture(capture_id: int, payload: LeadCaptureReviewRequest, db: 
 
     db.commit()
     return {"message": "review recorded", "capture_id": capture.id, "review_status": capture.review_status}
+
+
+@app.get("/activity-events", response_model=List[ActivityEventRead], dependencies=[Depends(require_api_key)])
+def list_activity_events(
+    source_module: Optional[str] = None,
+    event_type: Optional[str] = None,
+    prospect_id: Optional[int] = None,
+    campaign_key: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_session),
+):
+    limit = min(200, max(1, limit))
+    stmt = select(ActivityEvent).order_by(ActivityEvent.created_at.desc()).limit(limit)
+    if source_module:
+        stmt = stmt.where(ActivityEvent.source_module == source_module)
+    if event_type:
+        stmt = stmt.where(ActivityEvent.event_type == event_type)
+    if prospect_id is not None:
+        stmt = stmt.where(ActivityEvent.prospect_id == prospect_id)
+    if campaign_key:
+        stmt = stmt.where(ActivityEvent.campaign_key == campaign_key)
+    return db.exec(stmt).all()
+
+
+@app.get("/conversations", response_model=List[ConversationRead], dependencies=[Depends(require_api_key)])
+def list_conversations(
+    channel: Optional[str] = None,
+    state: Optional[str] = None,
+    campaign_key: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_session),
+):
+    limit = min(200, max(1, limit))
+    stmt = select(Conversation).order_by(Conversation.last_message_at.desc(), Conversation.opened_at.desc()).limit(limit)
+    if channel:
+        stmt = stmt.where(Conversation.channel == channel)
+    if state:
+        stmt = stmt.where(Conversation.state == state)
+    if campaign_key:
+        stmt = stmt.where(Conversation.campaign_key == campaign_key)
+    return db.exec(stmt).all()
 
 
 @app.get("/export/contacts", dependencies=[Depends(require_api_key)])
