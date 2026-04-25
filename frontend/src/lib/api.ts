@@ -214,3 +214,9 @@ export const handoffOutreachToNurture = (data: {
     body: JSON.stringify(data),
   },
 )
+
+export const updateProspectLifecycle = (id: number, data: { target_stage: string; notes?: string }) =>
+  req<{ message: string; prospect_id: number; lifecycle_stage: string }>(`/prospects/${id}/lifecycle`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })

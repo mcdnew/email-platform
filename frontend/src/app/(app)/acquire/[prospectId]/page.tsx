@@ -2,12 +2,13 @@
 
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
-import { getActivityEventsByProspect, getConversationsByProspect, getProspectTimeline, getProspects } from '@/lib/api'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { getActivityEventsByProspect, getConversationsByProspect, getProspectTimeline, getProspects, updateProspectLifecycle } from '@/lib/api'
 
 export default function AcquireProspectDetailPage() {
   const params = useParams<{ prospectId: string }>()
   const prospectId = Number(params.prospectId)
+  const qc = useQueryClient()
 
   const { data: prospectPage, isLoading: prospectLoading } = useQuery({
     queryKey: ['acquire-prospect', prospectId],
@@ -28,6 +29,17 @@ export default function AcquireProspectDetailPage() {
     queryFn: () => getProspectTimeline(prospectId),
     enabled: Number.isFinite(prospectId),
   })
+  const lifecycleMutation = useMutation({
+    mutationFn: ({ targetStage, notes }: { targetStage: string; notes?: string }) =>
+      updateProspectLifecycle(prospectId, { target_stage: targetStage, notes }),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['prospects'] }),
+        qc.invalidateQueries({ queryKey: ['activity-events'] }),
+        qc.invalidateQueries({ queryKey: ['conversations'] }),
+      ])
+    },
+  })
 
   const prospect = prospectPage?.items.find((item) => item.id === prospectId)
 
@@ -45,6 +57,37 @@ export default function AcquireProspectDetailPage() {
             {[prospect?.company, prospect?.email, prospect?.lifecycle_stage].filter(Boolean).join(' • ')}
           </p>
         </div>
+        {prospect && (
+          <div className="flex flex-wrap gap-2">
+            {prospect.lifecycle_stage === 'interested' && (
+              <button
+                onClick={() => lifecycleMutation.mutate({ targetStage: 'qualified', notes: 'Qualified from acquisition detail view' })}
+                className="px-3 py-2 text-xs rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                disabled={lifecycleMutation.isPending}
+              >
+                Mark qualified
+              </button>
+            )}
+            {prospect.lifecycle_stage !== 'lost' && prospect.lifecycle_stage !== 'archived' && (
+              <button
+                onClick={() => lifecycleMutation.mutate({ targetStage: 'lost' })}
+                className="px-3 py-2 text-xs rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+                disabled={lifecycleMutation.isPending}
+              >
+                Mark lost
+              </button>
+            )}
+            {prospect.lifecycle_stage === 'lost' && (
+              <button
+                onClick={() => lifecycleMutation.mutate({ targetStage: 'archived' })}
+                className="px-3 py-2 text-xs rounded-md bg-gray-900 text-white hover:bg-black dark:bg-gray-700 dark:hover:bg-gray-600 disabled:opacity-50"
+                disabled={lifecycleMutation.isPending}
+              >
+                Archive
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

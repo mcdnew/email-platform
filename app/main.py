@@ -30,6 +30,7 @@ from app.schemas import (
     OutreachDiscoveryIngestRequest, OutreachDiscoveryIngestResponse, OutreachDiscoveryResultItem,
     OutreachMessageSentRequest, OutreachReplyIngestRequest, OutreachNurtureHandoffRequest,
     LeadCaptureReviewRequest, LeadCaptureRead, ActivityEventRead, ConversationRead,
+    ProspectLifecycleActionRequest,
 )
 from app.mailer import send_email
 from app.config import settings
@@ -37,6 +38,7 @@ from app.tracking import load_unsubscribe_token
 from app.logging_config import configure_logging
 from app import crud
 from app.lifecycle import map_outreach_reply_intent_to_stage
+from app.lifecycle import can_transition_contact_stage
 from app.routes import open_tracking
 from app.dev import router as dev_router
 
@@ -1744,6 +1746,43 @@ def list_conversations(
     if campaign_key:
         stmt = stmt.where(Conversation.campaign_key == campaign_key)
     return db.exec(stmt).all()
+
+
+@app.post("/prospects/{pid}/lifecycle", dependencies=[Depends(require_api_key)])
+def update_prospect_lifecycle(pid: int, payload: ProspectLifecycleActionRequest, db: Session = Depends(get_session)):
+    prospect = db.get(Prospect, pid)
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Prospect not found")
+
+    target_stage = payload.target_stage
+    if not can_transition_contact_stage(prospect.lifecycle_stage, target_stage):
+        raise HTTPException(status_code=409, detail=f"Cannot transition from {prospect.lifecycle_stage} to {target_stage}")
+
+    prospect.lifecycle_stage = target_stage
+    if target_stage == "qualified" and prospect.qualified_at is None:
+        prospect.qualified_at = datetime.utcnow()
+    if target_stage == "interested" and prospect.interested_at is None:
+        prospect.interested_at = datetime.utcnow()
+    if payload.notes:
+        prospect.notes = f"{prospect.notes}\n---\n{payload.notes}" if prospect.notes else payload.notes
+    db.add(prospect)
+
+    if target_stage in {"lost", "archived"}:
+        conversations = db.exec(select(Conversation).where(Conversation.prospect_id == prospect.id)).all()
+        for conversation in conversations:
+            if conversation.state not in {"suppressed", "closed"}:
+                conversation.state = "closed"
+                db.add(conversation)
+
+    _record_activity_event(
+        db,
+        prospect_id=prospect.id,
+        event_type="prospect.lifecycle_updated",
+        source_module="ops",
+        payload={"target_stage": target_stage},
+    )
+    db.commit()
+    return {"message": "lifecycle updated", "prospect_id": prospect.id, "lifecycle_stage": prospect.lifecycle_stage}
 
 
 @app.get("/export/contacts", dependencies=[Depends(require_api_key)])

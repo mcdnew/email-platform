@@ -206,3 +206,8 @@ class ConversationRead(BaseModel):
     state: str
     opened_at: datetime
     last_message_at: Optional[datetime] = None
+
+
+class ProspectLifecycleActionRequest(BaseModel):
+    target_stage: str
+    notes: Optional[str] = None
