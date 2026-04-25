@@ -1,6 +1,7 @@
 ### app/models.py
-# This file defines the core SQLModel database models and CRUD-related schemas.
-# Models correspond to database tables for prospects, templates, sequences, steps, and emails.
+# This file defines the current and transitional SQLModel database models.
+# It still serves the existing email-platform, while incrementally adding
+# the canonical platform concepts needed for the larger migration.
 
 from typing import Optional
 from sqlmodel import SQLModel, Field
@@ -18,6 +19,13 @@ class Prospect(SQLModel, table=True):
     sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     unsubscribed: bool = Field(default=False)
+    lifecycle_stage: str = Field(default="captured", index=True)
+    source_type: str = Field(default="manual", index=True)
+    source_ref: Optional[str] = None
+    owner: Optional[str] = None
+    last_contacted_at: Optional[datetime] = None
+    interested_at: Optional[datetime] = None
+    qualified_at: Optional[datetime] = None
 
     # Business card fields
     phone: Optional[str] = None
@@ -81,8 +89,90 @@ class SmtpSettings(SQLModel, table=True):
     smtp_bcc: Optional[str] = None
     updated_at: Optional[datetime] = None
 
+
+class Enrollment(SQLModel, table=True):
+    """Canonical sequence membership record for acquisition and nurture flows."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    prospect_id: int = Field(foreign_key="prospect.id")
+    sequence_id: int = Field(foreign_key="sequence.id")
+    campaign_key: Optional[str] = Field(default=None, index=True)
+    status: str = Field(default="draft", index=True)
+    current_step: int = Field(default=0)
+    entered_at: datetime = Field(default_factory=datetime.utcnow)
+    paused_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    exit_reason: Optional[str] = None
+
+
+class Suppression(SQLModel, table=True):
+    """Unified suppression/do-not-contact record."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    prospect_id: Optional[int] = Field(default=None, foreign_key="prospect.id")
+    email: Optional[str] = Field(default=None, index=True)
+    scope: str = Field(default="global", index=True)
+    reason: str = Field(default="manual")
+    channel: Optional[str] = None
+    campaign_key: Optional[str] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: Optional[datetime] = None
+
+
+class ActivityEvent(SQLModel, table=True):
+    """Unified timeline/event log across capture, acquisition, and nurture."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    prospect_id: Optional[int] = Field(default=None, foreign_key="prospect.id")
+    sequence_id: Optional[int] = Field(default=None, foreign_key="sequence.id")
+    campaign_key: Optional[str] = None
+    event_type: str = Field(index=True)
+    source_module: str = Field(index=True)
+    payload_json: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Conversation(SQLModel, table=True):
+    """Thread-level conversation record, especially for Gmail-backed outreach."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    prospect_id: int = Field(foreign_key="prospect.id")
+    campaign_key: Optional[str] = Field(default=None, index=True)
+    channel: str = Field(default="smtp")
+    provider_thread_id: Optional[str] = Field(default=None, index=True)
+    state: str = Field(default="open", index=True)
+    opened_at: datetime = Field(default_factory=datetime.utcnow)
+    last_message_at: Optional[datetime] = None
+
+
+class Asset(SQLModel, table=True):
+    """Canonical uploaded-file metadata record."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    prospect_id: int = Field(foreign_key="prospect.id")
+    asset_type: str = Field(index=True)
+    storage_backend: str = Field(default="local")
+    storage_path: str
+    content_type: Optional[str] = None
+    original_filename: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class LeadCapture(SQLModel, table=True):
+    """Raw inbound capture/discovery payload before full normalization."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    prospect_id: Optional[int] = Field(default=None, foreign_key="prospect.id")
+    source_type: str = Field(index=True)
+    review_status: str = Field(default="pending_review", index=True)
+    raw_payload_json: Optional[str] = None
+    normalized_payload_json: Optional[str] = None
+    external_ref: Optional[str] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    reviewed_at: Optional[datetime] = None
+
+
 class EmailTemplateUpdate(SQLModel):
     name: Optional[str] = None
     subject: Optional[str] = None
     body: Optional[str] = None
-
