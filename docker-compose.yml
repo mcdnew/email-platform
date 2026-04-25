@@ -27,6 +27,25 @@ services:
       - card_images:/app/card_images
       - voice_notes:/app/voice_notes
 
+  worker:
+    build:
+      context: ../outreach-bot
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - backend
+    env_file:
+      - ../outreach-bot/.env
+    environment:
+      CORE_PLATFORM_URL: "http://backend:8000"
+      CORE_PLATFORM_PUBLIC_URL: ${CORE_PLATFORM_PUBLIC_URL:-}
+      CORE_PLATFORM_API_KEY: ${API_KEY}
+      UNSUBSCRIBE_SECRET: ${UNSUBSCRIBE_SECRET}
+    volumes:
+      - ../outreach-bot/campaigns:/app/campaigns
+      - ../outreach-bot/outreach.db:/app/outreach.db
+      - worker_state:/root/.config/hailing
+
   frontend:
     build:
       context: ./frontend
@@ -44,6 +63,7 @@ volumes:
   db_data:
   card_images:
   voice_notes:
+  worker_state:
 
 
 ## usage:
