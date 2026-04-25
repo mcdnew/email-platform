@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, handoffOutreachToNurture, reviewLeadCapture } from '@/lib/api'
@@ -139,7 +140,12 @@ export default function AcquirePage() {
             <div className="space-y-3">
               {interestedProspects.items.map((prospect) => (
                 <div key={prospect.id} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
-                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{prospect.name}</div>
+                        <Link
+                          href={`/acquire/${prospect.id}`}
+                          className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          {prospect.name}
+                        </Link>
                   <div className="text-xs text-gray-500 mt-1">
                     {[prospect.company, prospect.email].filter(Boolean).join(' • ')}
                   </div>
@@ -214,9 +220,12 @@ export default function AcquirePage() {
             <div className="space-y-3">
               {gmailConversations.map((conversation) => (
                 <div key={conversation.id} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
-                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  <Link
+                    href={`/acquire/${conversation.prospect_id}`}
+                    className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                  >
                     {conversation.provider_thread_id || `Conversation #${conversation.id}`}
-                  </div>
+                  </Link>
                   <div className="text-xs text-gray-500 mt-1">
                     {[conversation.campaign_key, conversation.state].filter(Boolean).join(' • ')}
                   </div>

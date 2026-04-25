@@ -193,6 +193,12 @@ export const getActivityEvents = (params: { source_module?: string; event_type?:
 export const getConversations = (params: { channel?: string; state?: string; campaign_key?: string; limit?: number }) =>
   req<Conversation[]>(`/conversations${buildQs(params)}`)
 
+export const getConversationsByProspect = (prospectId: number, params: { channel?: string; state?: string; campaign_key?: string; limit?: number } = {}) =>
+  req<Conversation[]>(`/conversations${buildQs({ ...params, prospect_id: prospectId })}`)
+
+export const getActivityEventsByProspect = (prospectId: number, params: { source_module?: string; event_type?: string; campaign_key?: string; limit?: number } = {}) =>
+  req<ActivityEvent[]>(`/activity-events${buildQs({ ...params, prospect_id: prospectId })}`)
+
 export const handoffOutreachToNurture = (data: {
   prospect_id: number
   campaign_key: string

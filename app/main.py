@@ -1726,6 +1726,7 @@ def list_activity_events(
 
 @app.get("/conversations", response_model=List[ConversationRead], dependencies=[Depends(require_api_key)])
 def list_conversations(
+    prospect_id: Optional[int] = None,
     channel: Optional[str] = None,
     state: Optional[str] = None,
     campaign_key: Optional[str] = None,
@@ -1734,6 +1735,8 @@ def list_conversations(
 ):
     limit = min(200, max(1, limit))
     stmt = select(Conversation).order_by(Conversation.last_message_at.desc(), Conversation.opened_at.desc()).limit(limit)
+    if prospect_id is not None:
+        stmt = stmt.where(Conversation.prospect_id == prospect_id)
     if channel:
         stmt = stmt.where(Conversation.channel == channel)
     if state:
