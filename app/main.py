@@ -570,6 +570,7 @@ _PROSPECT_SORT = {
 def list_prospects(
     assigned:     Optional[str] = None,
     unsubscribed: Optional[str] = None,
+    lifecycle_stage: Optional[str] = None,
     page:         int = 1,
     per_page:     int = 50,
     sort_by:      str = "name",
@@ -588,6 +589,8 @@ def list_prospects(
     if unsubscribed is not None:
         flag = str(unsubscribed).lower() in {"1", "true", "yes", "on"}
         filters.append(Prospect.unsubscribed == flag)
+    if lifecycle_stage:
+        filters.append(Prospect.lifecycle_stage == lifecycle_stage)
     if search:
         term = f"%{search}%"
         filters.append(

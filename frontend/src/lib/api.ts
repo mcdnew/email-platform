@@ -3,7 +3,7 @@
 
 import type {
   Prospect, ProspectCreate, EmailTemplate, Sequence, SequenceStep,
-  ScheduledEmail, SentEmail, AnalyticsSummary, PaginatedResponse, BulkImportResult,
+  ScheduledEmail, SentEmail, AnalyticsSummary, PaginatedResponse, BulkImportResult, LeadCapture,
 } from './types'
 
 async function req<T>(
@@ -41,7 +41,7 @@ export const getAnalytics = () => req<AnalyticsSummary>('/analytics/summary')
 // ── Prospects ──────────────────────────────────────────────────────────────
 export const getProspects = (params: {
   page?: number; per_page?: number; sort_by?: string;
-  order?: string; search?: string; assigned?: string; unsubscribed?: string
+  order?: string; search?: string; assigned?: string; unsubscribed?: string; lifecycle_stage?: string
 }) => req<PaginatedResponse<Prospect>>(`/prospects${buildQs(params)}`)
 
 export const createProspect = (data: ProspectCreate) =>
@@ -175,3 +175,13 @@ export type LogEntry = {
 
 export const getErrorLog  = () => req<{ entries: LogEntry[] }>('/error-log')
 export const clearErrorLog = () => req<{ message: string }>('/clear-error-log', { method: 'POST' })
+
+// ── Acquisition / review ────────────────────────────────────────────────────
+export const getLeadCaptures = (params: { review_status?: string; source_type?: string }) =>
+  req<LeadCapture[]>(`/lead-captures${buildQs(params)}`)
+
+export const reviewLeadCapture = (id: number, data: { review_status: 'approved' | 'rejected'; notes?: string }) =>
+  req<{ message: string; capture_id: number; review_status: string }>(`/lead-captures/${id}/review`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })

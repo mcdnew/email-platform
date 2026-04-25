@@ -8,11 +8,24 @@ export interface Prospect {
   title: string | null
   sequence_id: number | null
   sequence_name: string | null
+  lifecycle_stage: string | null
   sequence_steps_total: number
   sequence_step_current: number
   sequence_progress_pct: number
   created_at: string
   unsubscribed: boolean
+}
+
+export interface LeadCapture {
+  id: number
+  prospect_id: number | null
+  source_type: string
+  review_status: string
+  raw_payload_json: string | null
+  normalized_payload_json: string | null
+  external_ref: string | null
+  created_at: string
+  reviewed_at: string | null
 }
 
 export interface ProspectCreate {

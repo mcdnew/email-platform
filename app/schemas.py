@@ -60,6 +60,7 @@ class ProspectRead(BaseModel):
     company: Optional[str]
     sequence_id: Optional[int]
     sequence_name: Optional[str]
+    lifecycle_stage: Optional[str] = None
 
     class Config:
         orm_mode = True

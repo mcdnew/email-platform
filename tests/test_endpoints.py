@@ -187,6 +187,16 @@ class TestProspectEndpoints:
         items = resp.json()["items"]
         assert all(not i["unsubscribed"] for i in items)
 
+    def test_list_prospects_filter_lifecycle_stage(self, client, db):
+        p1 = Prospect(name="Pending", email="pending@x.com", lifecycle_stage="pending_review")
+        p2 = Prospect(name="Interested", email="interested@x.com", lifecycle_stage="interested")
+        db.add(p1); db.add(p2); db.commit()
+
+        resp = client.get("/prospects?lifecycle_stage=interested")
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["email"] == "interested@x.com"
+
     def test_list_prospects_search(self, client, db):
         _make_prospect(db, email="alice@x.com", name="Alice")
         _make_prospect(db, email="bob@x.com", name="Bob")

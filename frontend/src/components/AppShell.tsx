@@ -6,12 +6,13 @@ import { useState, useEffect } from 'react'
 import { useTheme } from 'next-themes'
 import {
   LayoutDashboard, Users, FileText, GitBranch,
-  Clock, Mail, Settings, LogOut, Send, Menu, X, Sun, Moon,
+  Clock, Mail, Settings, LogOut, Send, Menu, X, Sun, Moon, Radar,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/acquire', label: 'Acquire', icon: Radar },
   { href: '/prospects', label: 'Prospects', icon: Users },
   { href: '/templates', label: 'Templates', icon: FileText },
   { href: '/sequences', label: 'Sequences', icon: GitBranch },
