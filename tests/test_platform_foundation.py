@@ -374,3 +374,43 @@ def test_sequence_assignment_creates_enrollment_and_handoff_promotes_to_nurture(
         )
     ).first()
     assert handoff_event is not None
+
+
+def test_lead_capture_review_queue_and_approval(client, db):
+    ingest = client.post(
+        "/integrations/outreach/discoveries",
+        json={
+            "campaign_key": "acquire:lumber",
+            "approval_required": True,
+            "leads": [
+                {
+                    "name": "Queue Lead",
+                    "email": "queue@example.com",
+                    "company": "Queue Co",
+                    "external_ref": "queue-1",
+                }
+            ],
+        },
+    )
+    assert ingest.status_code == 200
+
+    queue_resp = client.get("/lead-captures?review_status=pending_review&source_type=web_discovery")
+    assert queue_resp.status_code == 200
+    items = queue_resp.json()
+    assert len(items) == 1
+    capture_id = items[0]["id"]
+
+    review_resp = client.post(
+        f"/lead-captures/{capture_id}/review",
+        json={"review_status": "approved", "notes": "Operator approved"},
+    )
+    assert review_resp.status_code == 200
+
+    capture = db.get(LeadCapture, capture_id)
+    assert capture.review_status == "approved"
+    assert capture.reviewed_at is not None
+
+    prospect = db.exec(select(Prospect).where(Prospect.email == "queue@example.com")).first()
+    assert prospect is not None
+    assert prospect.lifecycle_stage == "ready_for_outreach"
+    assert "Operator approved" in (prospect.notes or "")

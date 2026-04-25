@@ -166,3 +166,20 @@ class OutreachNurtureHandoffRequest(BaseModel):
     start_date: Optional[str] = None
     ventilate_days: Optional[int] = 0
     notes: Optional[str] = None
+
+
+class LeadCaptureReviewRequest(BaseModel):
+    review_status: str  # approved | rejected
+    notes: Optional[str] = None
+
+
+class LeadCaptureRead(BaseModel):
+    id: int
+    prospect_id: Optional[int] = None
+    source_type: str
+    review_status: str
+    raw_payload_json: Optional[str] = None
+    normalized_payload_json: Optional[str] = None
+    external_ref: Optional[str] = None
+    created_at: datetime
+    reviewed_at: Optional[datetime] = None

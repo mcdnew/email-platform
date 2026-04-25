@@ -29,6 +29,7 @@ from app.schemas import (
     ProspectImport, StepReorderRequest, BusinessCardUpsert, BusinessCardUpsertResponse,
     OutreachDiscoveryIngestRequest, OutreachDiscoveryIngestResponse, OutreachDiscoveryResultItem,
     OutreachMessageSentRequest, OutreachReplyIngestRequest, OutreachNurtureHandoffRequest,
+    LeadCaptureReviewRequest, LeadCaptureRead,
 )
 from app.mailer import send_email
 from app.config import settings
@@ -1647,6 +1648,55 @@ def handoff_outreach_prospect_to_nurture(payload: OutreachNurtureHandoffRequest,
         "sequence_id": payload.sequence_id,
         "lifecycle_stage": prospect.lifecycle_stage,
     }
+
+
+@app.get("/lead-captures", response_model=List[LeadCaptureRead], dependencies=[Depends(require_api_key)])
+def list_lead_captures(
+    review_status: Optional[str] = None,
+    source_type: Optional[str] = None,
+    db: Session = Depends(get_session),
+):
+    stmt = select(LeadCapture).order_by(LeadCapture.created_at.desc())
+    if review_status:
+        stmt = stmt.where(LeadCapture.review_status == review_status)
+    if source_type:
+        stmt = stmt.where(LeadCapture.source_type == source_type)
+    return db.exec(stmt).all()
+
+
+@app.post("/lead-captures/{capture_id}/review", dependencies=[Depends(require_api_key)])
+def review_lead_capture(capture_id: int, payload: LeadCaptureReviewRequest, db: Session = Depends(get_session)):
+    if payload.review_status not in {"approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="review_status must be approved or rejected")
+
+    capture = db.get(LeadCapture, capture_id)
+    if not capture:
+        raise HTTPException(status_code=404, detail="Lead capture not found")
+
+    capture.review_status = payload.review_status
+    capture.reviewed_at = datetime.utcnow()
+    db.add(capture)
+
+    prospect = db.get(Prospect, capture.prospect_id) if capture.prospect_id else None
+    if prospect:
+        if payload.notes:
+            prospect.notes = f"{prospect.notes}\n---\n{payload.notes}" if prospect.notes else payload.notes
+        if payload.review_status == "approved":
+            if prospect.lifecycle_stage == "pending_review":
+                prospect.lifecycle_stage = "ready_for_outreach"
+        else:
+            prospect.lifecycle_stage = "lost"
+        db.add(prospect)
+        _record_activity_event(
+            db,
+            prospect_id=prospect.id,
+            event_type="lead_capture.reviewed",
+            source_module="ops",
+            payload={"review_status": payload.review_status, "capture_id": capture.id},
+        )
+
+    db.commit()
+    return {"message": "review recorded", "capture_id": capture.id, "review_status": capture.review_status}
 
 
 @app.get("/export/contacts", dependencies=[Depends(require_api_key)])

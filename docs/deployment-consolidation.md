@@ -38,6 +38,22 @@ cp worker.env.example worker.env
 docker compose up --build
 ```
 
+If the reverse-proxy image cannot be pulled in the current environment, the
+stack can still run without it because `proxy` is now placed behind the
+optional Compose profile `proxy`.
+
+Default local/runtime validation path:
+
+```bash
+docker compose up --build
+```
+
+Production-style path with reverse proxy:
+
+```bash
+docker compose --profile proxy up --build
+```
+
 ## Required Local/Server Layout
 
 For the current compose file to work:
@@ -86,6 +102,11 @@ Target behavior:
 - API paths for mobile or backend-facing external use: `/api/core/*`
 - unsubscribe links from worker emails: core backend `/unsubscribe`
 - tracking links: core backend `/track_open` and `/track_click`
+
+Fallback local behavior without the proxy profile:
+
+- frontend is exposed on `:3000`
+- backend is exposed on `:8000`
 
 This is already partially supported:
 
