@@ -1,3 +1,6 @@
+import io
+import json
+
 from sqlalchemy import inspect
 from sqlmodel import select
 
@@ -121,3 +124,73 @@ def test_foundation_models_can_persist_together(db):
     assert db.exec(select(Conversation)).one().provider_thread_id == "thread-123"
     assert db.exec(select(Asset)).one().asset_type == "business_card_image"
     assert db.exec(select(LeadCapture)).one().external_ref == "scan-001"
+
+
+def test_business_card_upsert_creates_lead_capture_and_activity(client, db):
+    resp = client.post(
+        "/prospects/upsert",
+        json={
+            "name": "Alice Card",
+            "email": "alice.card@example.com",
+            "company": "Acme",
+            "phone": "+34123456",
+            "tags": ["expo", "priority"],
+            "notes": "Met at booth",
+            "scanned_at": "2026-04-25T10:00:00",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["action"] == "created"
+
+    prospect = db.get(Prospect, payload["id"])
+    assert prospect is not None
+    assert prospect.source_type == "business_card"
+    assert prospect.lifecycle_stage == "captured"
+
+    capture = db.exec(select(LeadCapture).where(LeadCapture.prospect_id == prospect.id)).first()
+    assert capture is not None
+    assert capture.source_type == "business_card"
+    assert capture.review_status == "linked"
+    normalized = json.loads(capture.normalized_payload_json)
+    assert normalized["email"] == "alice.card@example.com"
+
+    event = db.exec(select(ActivityEvent).where(ActivityEvent.prospect_id == prospect.id)).first()
+    assert event is not None
+    assert event.event_type == "capture.upserted"
+    assert event.source_module == "capture"
+
+
+def test_asset_upload_endpoints_create_asset_records(client, db, tmp_path, monkeypatch):
+    import app.main as app_main
+
+    monkeypatch.setattr(app_main, "CARD_IMAGES_DIR", str(tmp_path / "card_images"))
+    monkeypatch.setattr(app_main, "VOICE_NOTES_DIR", str(tmp_path / "voice_notes"))
+
+    prospect = Prospect(name="Asset User", email="asset@example.com")
+    db.add(prospect)
+    db.commit()
+    db.refresh(prospect)
+
+    img_resp = client.post(
+        f"/prospects/{prospect.id}/card-image",
+        files={"file": ("card.jpg", io.BytesIO(b"fake-jpg"), "image/jpeg")},
+    )
+    assert img_resp.status_code == 200
+    img_path = img_resp.json()["path"]
+    assert img_path.startswith(str(tmp_path))
+
+    voice_resp = client.post(
+        f"/prospects/{prospect.id}/voice-note",
+        files={"file": ("note.m4a", io.BytesIO(b"fake-audio"), "audio/mp4")},
+    )
+    assert voice_resp.status_code == 200
+    voice_path = voice_resp.json()["path"]
+    assert voice_path.startswith(str(tmp_path))
+
+    assets = db.exec(select(Asset).where(Asset.prospect_id == prospect.id)).all()
+    asset_types = {a.asset_type for a in assets}
+    assert asset_types == {"business_card_image", "voice_note_audio"}
+
+    events = db.exec(select(ActivityEvent).where(ActivityEvent.prospect_id == prospect.id)).all()
+    assert sum(1 for event in events if event.event_type == "asset.uploaded") == 2

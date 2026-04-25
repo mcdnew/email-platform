@@ -22,6 +22,7 @@ from app.database import get_session
 from app.models import (
     Prospect, EmailTemplate, Sequence, SequenceStep,
     ScheduledEmail, SentEmail, SmtpSettings,
+    ActivityEvent, Asset, LeadCapture,
 )
 from app.schemas import (
     AssignSequenceRequest, SequenceCreate, SequenceRead, TestEmailRequest,
@@ -124,6 +125,68 @@ def _scalar(db: Session, stmt) -> int:
     if isinstance(res, (list, tuple)):
         return res[0]
     return int(res)
+
+def _model_dump(model: BaseModel) -> dict:
+    if hasattr(model, "model_dump"):
+        return model.model_dump(exclude_none=True)
+    return model.dict(exclude_none=True)
+
+def _record_activity_event(
+    db: Session,
+    *,
+    event_type: str,
+    source_module: str,
+    prospect_id: Optional[int] = None,
+    sequence_id: Optional[int] = None,
+    campaign_key: Optional[str] = None,
+    payload: Optional[dict] = None,
+) -> None:
+    db.add(ActivityEvent(
+        prospect_id=prospect_id,
+        sequence_id=sequence_id,
+        campaign_key=campaign_key,
+        event_type=event_type,
+        source_module=source_module,
+        payload_json=json.dumps(payload) if payload is not None else None,
+    ))
+
+def _record_lead_capture(
+    db: Session,
+    *,
+    prospect_id: Optional[int],
+    source_type: str,
+    review_status: str,
+    raw_payload: Optional[dict] = None,
+    normalized_payload: Optional[dict] = None,
+    external_ref: Optional[str] = None,
+) -> None:
+    db.add(LeadCapture(
+        prospect_id=prospect_id,
+        source_type=source_type,
+        review_status=review_status,
+        raw_payload_json=json.dumps(raw_payload) if raw_payload is not None else None,
+        normalized_payload_json=json.dumps(normalized_payload) if normalized_payload is not None else None,
+        external_ref=external_ref,
+        reviewed_at=datetime.utcnow() if review_status in {"approved", "linked"} else None,
+    ))
+
+def _record_asset(
+    db: Session,
+    *,
+    prospect_id: int,
+    asset_type: str,
+    storage_path: str,
+    content_type: Optional[str] = None,
+    original_filename: Optional[str] = None,
+) -> None:
+    db.add(Asset(
+        prospect_id=prospect_id,
+        asset_type=asset_type,
+        storage_backend="local",
+        storage_path=storage_path,
+        content_type=content_type,
+        original_filename=original_filename,
+    ))
 
 def _sent_today(db: Session) -> int:
     today = _now().date()
@@ -995,6 +1058,21 @@ def upsert_prospect(data: BusinessCardUpsert, db: Session = Depends(get_session)
     - Existing email → merge fields, append voice note, return action="updated"
     """
     existing = db.exec(select(Prospect).where(Prospect.email == data.email)).first()
+    raw_payload = _model_dump(data)
+    normalized_payload = {
+        "name": data.name,
+        "email": data.email,
+        "phone": data.phone,
+        "company": data.company,
+        "title": data.title,
+        "website": data.website,
+        "address": data.address,
+        "linkedin": data.linkedin,
+        "tags": data.tags,
+        "notes": data.notes,
+        "voice_note": data.voice_note,
+        "scanned_at": data.scanned_at,
+    }
 
     # Merge voice note into existing JSON array
     voice_notes_list = []
@@ -1027,7 +1105,23 @@ def upsert_prospect(data: BusinessCardUpsert, db: Session = Depends(get_session)
             existing.voice_notes = json.dumps(voice_notes_list)
         if data.scanned_at:
             existing.scanned_at = datetime.fromisoformat(data.scanned_at)
+        existing.source_type = "business_card"
         db.add(existing)
+        _record_lead_capture(
+            db,
+            prospect_id=existing.id,
+            source_type="business_card",
+            review_status="linked",
+            raw_payload=raw_payload,
+            normalized_payload=normalized_payload,
+        )
+        _record_activity_event(
+            db,
+            prospect_id=existing.id,
+            event_type="capture.upserted",
+            source_module="capture",
+            payload={"action": "updated", "source_type": "business_card"},
+        )
         db.commit()
         db.refresh(existing)
         logger.info("prospect_upserted", extra={"action": "updated", "email": data.email, "id": existing.id})
@@ -1046,8 +1140,26 @@ def upsert_prospect(data: BusinessCardUpsert, db: Session = Depends(get_session)
             notes=data.notes,
             voice_notes=json.dumps(voice_notes_list) if voice_notes_list else None,
             scanned_at=datetime.fromisoformat(data.scanned_at) if data.scanned_at else datetime.utcnow(),
+            lifecycle_stage="captured",
+            source_type="business_card",
         )
         db.add(prospect)
+        db.flush()
+        _record_lead_capture(
+            db,
+            prospect_id=prospect.id,
+            source_type="business_card",
+            review_status="linked",
+            raw_payload=raw_payload,
+            normalized_payload=normalized_payload,
+        )
+        _record_activity_event(
+            db,
+            prospect_id=prospect.id,
+            event_type="capture.upserted",
+            source_module="capture",
+            payload={"action": "created", "source_type": "business_card"},
+        )
         db.commit()
         db.refresh(prospect)
         logger.info("prospect_upserted", extra={"action": "created", "email": data.email, "id": prospect.id})
@@ -1072,6 +1184,21 @@ async def upload_card_image(pid: int, file: UploadFile = File(...), db: Session 
 
     prospect.card_image_path = filepath
     db.add(prospect)
+    _record_asset(
+        db,
+        prospect_id=prospect.id,
+        asset_type="business_card_image",
+        storage_path=filepath,
+        content_type=file.content_type,
+        original_filename=file.filename,
+    )
+    _record_activity_event(
+        db,
+        prospect_id=prospect.id,
+        event_type="asset.uploaded",
+        source_module="capture",
+        payload={"asset_type": "business_card_image", "path": filepath},
+    )
     db.commit()
 
     return {"path": filepath}
@@ -1102,6 +1229,21 @@ async def upload_voice_note(pid: int, file: UploadFile = File(...), db: Session 
     existing.append({"file": filepath, "recorded_at": datetime.utcnow().isoformat()})
     prospect.voice_notes = json.dumps(existing)
     db.add(prospect)
+    _record_asset(
+        db,
+        prospect_id=prospect.id,
+        asset_type="voice_note_audio",
+        storage_path=filepath,
+        content_type=file.content_type,
+        original_filename=file.filename,
+    )
+    _record_activity_event(
+        db,
+        prospect_id=prospect.id,
+        event_type="asset.uploaded",
+        source_module="capture",
+        payload={"asset_type": "voice_note_audio", "path": filepath},
+    )
     db.commit()
 
     return {"path": filepath}
@@ -1165,6 +1307,17 @@ def send_email_to_prospect(data: SendEmailRequest, db: Session = Depends(get_ses
     )
 
     sent_record.status = result
+    if result == "sent":
+        prospect.last_contacted_at = datetime.utcnow()
+        db.add(prospect)
+        _record_activity_event(
+            db,
+            prospect_id=prospect.id,
+            sequence_id=sent_record.sequence_id,
+            event_type="message.sent",
+            source_module="nurture",
+            payload={"channel": "smtp", "template_id": template.id, "manual": True},
+        )
     db.add(sent_record)
     db.commit()
 
