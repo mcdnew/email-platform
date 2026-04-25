@@ -4,7 +4,7 @@
 import type {
   Prospect, ProspectCreate, EmailTemplate, Sequence, SequenceStep,
   ScheduledEmail, SentEmail, AnalyticsSummary, PaginatedResponse, BulkImportResult, LeadCapture,
-  ActivityEvent, Conversation, AcquisitionCampaignSummary, WorkerCampaign,
+  ActivityEvent, Conversation, AcquisitionCampaignSummary, WorkerCampaign, WorkerCampaignDetail,
 } from './types'
 
 async function req<T>(
@@ -232,3 +232,6 @@ export const runWorkerCampaign = (campaignName: string, data: { dry_run?: boolea
     method: 'POST',
     body: JSON.stringify({ dry_run: data.dry_run ?? false }),
   })
+
+export const getWorkerCampaignDetail = (campaignName: string) =>
+  req<WorkerCampaignDetail>(`/acquire/worker/campaigns/${campaignName}`)

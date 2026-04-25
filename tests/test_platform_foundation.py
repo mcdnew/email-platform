@@ -576,3 +576,33 @@ def test_worker_campaign_run_proxy_records_activity(client, db, monkeypatch):
     event = db.exec(select(ActivityEvent).where(ActivityEvent.event_type == "acquire.worker_run_requested")).first()
     assert event is not None
     assert event.campaign_key == "alpha"
+
+
+def test_worker_campaign_detail_proxy_returns_payload(client, monkeypatch):
+    import app.main as app_main
+
+    class DummyResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {
+                "name": "alpha",
+                "config": {"campaign": {"product": "TallyExpress"}, "sequence": [{"day": 0, "type": "initial"}]},
+                "stats": {"emails_sent": 8},
+                "running": False,
+                "started": None,
+                "error": None,
+            }
+
+    def fake_get(url: str, timeout: int):
+        assert url.endswith("/api/campaigns/alpha")
+        assert timeout == 5
+        return DummyResponse()
+
+    monkeypatch.setattr(app_main.requests, "get", fake_get)
+    resp = client.get("/acquire/worker/campaigns/alpha")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["name"] == "alpha"
+    assert payload["config"]["campaign"]["product"] == "TallyExpress"

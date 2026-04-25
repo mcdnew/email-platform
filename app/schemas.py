@@ -238,3 +238,12 @@ class WorkerCampaignRead(BaseModel):
 
 class WorkerCampaignRunRequest(BaseModel):
     dry_run: bool = False
+
+
+class WorkerCampaignDetailRead(BaseModel):
+    name: str
+    config: dict
+    stats: dict
+    running: bool
+    started: Optional[str] = None
+    error: Optional[str] = None

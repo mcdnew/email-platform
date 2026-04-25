@@ -35,6 +35,7 @@ from app.schemas import (
     AcquisitionCampaignSummaryRead,
     WorkerCampaignRead,
     WorkerCampaignRunRequest,
+    WorkerCampaignDetailRead,
 )
 from app.mailer import send_email
 from app.config import settings
@@ -1876,6 +1877,22 @@ def run_worker_campaign(campaign_name: str, payload: WorkerCampaignRunRequest, d
             payload={"dry_run": payload.dry_run},
         )
         db.commit()
+        return res.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
+
+
+@app.get("/acquire/worker/campaigns/{campaign_name}", response_model=WorkerCampaignDetailRead, dependencies=[Depends(require_api_key)])
+def worker_campaign_detail(campaign_name: str):
+    try:
+        res = requests.get(f"{_worker_base_url()}/api/campaigns/{campaign_name}", timeout=5)
+        if res.status_code == 404:
+            raise HTTPException(status_code=404, detail="Worker campaign not found")
+        if res.status_code >= 400:
+            detail = res.json().get("error", res.text)
+            raise HTTPException(status_code=res.status_code, detail=detail)
         return res.json()
     except HTTPException:
         raise

@@ -131,7 +131,9 @@ export default function AcquirePage() {
             {workerCampaigns.map((campaign) => (
               <div key={campaign.name} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{campaign.name}</div>
+                  <Link href={`/acquire/campaign/${encodeURIComponent(campaign.name)}`} className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline">
+                    {campaign.name}
+                  </Link>
                   <span className={`text-[11px] uppercase tracking-wide ${campaign.running ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
                     {campaign.running ? 'running' : 'idle'}
                   </span>

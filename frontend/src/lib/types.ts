@@ -73,6 +73,15 @@ export interface WorkerCampaign {
   error: string | null
 }
 
+export interface WorkerCampaignDetail {
+  name: string
+  config: Record<string, unknown>
+  stats: Record<string, unknown>
+  running: boolean
+  started: string | null
+  error: string | null
+}
+
 export interface ProspectCreate {
   name: string
   email: string
