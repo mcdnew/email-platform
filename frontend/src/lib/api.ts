@@ -235,3 +235,9 @@ export const runWorkerCampaign = (campaignName: string, data: { dry_run?: boolea
 
 export const getWorkerCampaignDetail = (campaignName: string) =>
   req<WorkerCampaignDetail>(`/acquire/worker/campaigns/${campaignName}`)
+
+export const updateWorkerCampaign = (campaignName: string, data: { config: Record<string, unknown> }) =>
+  req<{ message: string; campaign: string }>(`/acquire/worker/campaigns/${campaignName}`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })

@@ -36,6 +36,7 @@ from app.schemas import (
     WorkerCampaignRead,
     WorkerCampaignRunRequest,
     WorkerCampaignDetailRead,
+    WorkerCampaignUpdateRequest,
 )
 from app.mailer import send_email
 from app.config import settings
@@ -1893,6 +1894,34 @@ def worker_campaign_detail(campaign_name: str):
         if res.status_code >= 400:
             detail = res.json().get("error", res.text)
             raise HTTPException(status_code=res.status_code, detail=detail)
+        return res.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
+
+
+@app.post("/acquire/worker/campaigns/{campaign_name}", dependencies=[Depends(require_api_key)])
+def update_worker_campaign(campaign_name: str, payload: WorkerCampaignUpdateRequest, db: Session = Depends(get_session)):
+    try:
+        res = requests.post(
+            f"{_worker_base_url()}/api/campaigns/{campaign_name}",
+            json={"config": payload.config},
+            timeout=5,
+        )
+        if res.status_code == 404:
+            raise HTTPException(status_code=404, detail="Worker campaign not found")
+        if res.status_code >= 400:
+            detail = res.json().get("error", res.text)
+            raise HTTPException(status_code=res.status_code, detail=detail)
+        _record_activity_event(
+            db,
+            campaign_key=campaign_name,
+            event_type="acquire.worker_campaign_updated",
+            source_module="ops",
+            payload={},
+        )
+        db.commit()
         return res.json()
     except HTTPException:
         raise

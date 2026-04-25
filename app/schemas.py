@@ -247,3 +247,7 @@ class WorkerCampaignDetailRead(BaseModel):
     running: bool
     started: Optional[str] = None
     error: Optional[str] = None
+
+
+class WorkerCampaignUpdateRequest(BaseModel):
+    config: dict

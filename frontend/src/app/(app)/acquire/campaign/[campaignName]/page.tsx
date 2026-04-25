@@ -2,13 +2,15 @@
 
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getWorkerCampaignDetail, runWorkerCampaign } from '@/lib/api'
+import { getWorkerCampaignDetail, runWorkerCampaign, updateWorkerCampaign } from '@/lib/api'
 
 export default function AcquireCampaignDetailPage() {
   const params = useParams<{ campaignName: string }>()
   const campaignName = decodeURIComponent(params.campaignName)
   const qc = useQueryClient()
+  const [configJson, setConfigJson] = useState('')
 
   const { data, isLoading } = useQuery({
     queryKey: ['worker-campaign-detail', campaignName],
@@ -24,11 +26,25 @@ export default function AcquireCampaignDetailPage() {
       await qc.invalidateQueries({ queryKey: ['activity-events'] })
     },
   })
+  const saveMutation = useMutation({
+    mutationFn: (config: Record<string, unknown>) => updateWorkerCampaign(campaignName, { config }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['worker-campaign-detail', campaignName] })
+      await qc.invalidateQueries({ queryKey: ['worker-campaigns'] })
+      await qc.invalidateQueries({ queryKey: ['activity-events'] })
+    },
+  })
 
   const cfg = data?.config ?? {}
   const campaign = (cfg.campaign as Record<string, unknown> | undefined) ?? {}
   const discover = (cfg.discover as Record<string, unknown> | undefined) ?? {}
   const sequence = (cfg.sequence as Array<Record<string, unknown>> | undefined) ?? []
+
+  useEffect(() => {
+    if (data?.config) {
+      setConfigJson(JSON.stringify(data.config, null, 2))
+    }
+  }, [data?.config])
 
   return (
     <div className="p-6 space-y-6">
@@ -58,6 +74,20 @@ export default function AcquireCampaignDetailPage() {
             disabled={runMutation.isPending || Boolean(data?.running)}
           >
             Dry run
+          </button>
+          <button
+            onClick={() => {
+              try {
+                const parsed = JSON.parse(configJson) as Record<string, unknown>
+                saveMutation.mutate(parsed)
+              } catch {
+                // Keep the current page-level interaction minimal; invalid JSON just aborts save.
+              }
+            }}
+            className="px-3 py-2 text-xs rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+            disabled={saveMutation.isPending}
+          >
+            Save JSON
           </button>
         </div>
       </div>
@@ -95,6 +125,16 @@ export default function AcquireCampaignDetailPage() {
               <div><span className="font-medium">Started:</span> {data.started ?? '—'}</div>
               <div><span className="font-medium">Error:</span> {data.error ?? '—'}</div>
             </div>
+          </section>
+
+          <section className="xl:col-span-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+            <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">Config JSON</h2>
+            <textarea
+              value={configJson}
+              onChange={(e) => setConfigJson(e.target.value)}
+              className="w-full min-h-[320px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-mono text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+              spellCheck={false}
+            />
           </section>
 
           <section className="xl:col-span-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
