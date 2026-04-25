@@ -98,3 +98,71 @@ class StepReorderItem(BaseModel):
 class StepReorderRequest(BaseModel):
     steps: List[StepReorderItem]
 
+
+class OutreachDiscoveredLead(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[str] = None
+    company: Optional[str] = None
+    title: Optional[str] = None
+    country: Optional[str] = None
+    language: Optional[str] = None
+    website: Optional[str] = None
+    linkedin: Optional[str] = None
+    notes: Optional[str] = None
+    fact: Optional[str] = None
+    external_ref: Optional[str] = None
+
+
+class OutreachDiscoveryIngestRequest(BaseModel):
+    campaign_key: str
+    approval_required: bool = True
+    leads: List[OutreachDiscoveredLead]
+
+
+class OutreachDiscoveryResultItem(BaseModel):
+    external_ref: Optional[str] = None
+    prospect_id: Optional[int] = None
+    email: Optional[str] = None
+    action: str
+
+
+class OutreachDiscoveryIngestResponse(BaseModel):
+    created_or_updated: int
+    lead_captures_recorded: int
+    items: List[OutreachDiscoveryResultItem]
+
+
+class OutreachMessageSentRequest(BaseModel):
+    prospect_id: Optional[int] = None
+    email: Optional[str] = None
+    campaign_key: str
+    gmail_thread_id: str
+    sequence_step: int
+    subject: str
+    body: str
+    sent_at: Optional[str] = None
+
+
+class OutreachReplyIngestRequest(BaseModel):
+    prospect_id: Optional[int] = None
+    email: Optional[str] = None
+    campaign_key: str
+    intent: str
+    body: str
+    gmail_thread_id: Optional[str] = None
+    from_email: Optional[str] = None
+    incoming_message_id: Optional[str] = None
+    received_at: Optional[str] = None
+
+
+class OutreachNurtureHandoffRequest(BaseModel):
+    prospect_id: Optional[int] = None
+    email: Optional[str] = None
+    campaign_key: str
+    sequence_id: int
+    qualified: bool = True
+    start_date: Optional[str] = None
+    ventilate_days: Optional[int] = 0
+    notes: Optional[str] = None

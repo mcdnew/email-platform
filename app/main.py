@@ -22,17 +22,20 @@ from app.database import get_session
 from app.models import (
     Prospect, EmailTemplate, Sequence, SequenceStep,
     ScheduledEmail, SentEmail, SmtpSettings,
-    ActivityEvent, Asset, LeadCapture,
+    ActivityEvent, Asset, Conversation, LeadCapture, Suppression,
 )
 from app.schemas import (
     AssignSequenceRequest, SequenceCreate, SequenceRead, TestEmailRequest,
     ProspectImport, StepReorderRequest, BusinessCardUpsert, BusinessCardUpsertResponse,
+    OutreachDiscoveryIngestRequest, OutreachDiscoveryIngestResponse, OutreachDiscoveryResultItem,
+    OutreachMessageSentRequest, OutreachReplyIngestRequest, OutreachNurtureHandoffRequest,
 )
 from app.mailer import send_email
 from app.config import settings
 from app.tracking import load_unsubscribe_token
 from app.logging_config import configure_logging
 from app import crud
+from app.lifecycle import map_outreach_reply_intent_to_stage
 from app.routes import open_tracking
 from app.dev import router as dev_router
 
@@ -186,6 +189,85 @@ def _record_asset(
         storage_path=storage_path,
         content_type=content_type,
         original_filename=original_filename,
+    ))
+
+def _resolve_prospect_for_outreach(
+    db: Session,
+    *,
+    prospect_id: Optional[int] = None,
+    email: Optional[str] = None,
+) -> Prospect:
+    prospect = db.get(Prospect, prospect_id) if prospect_id else None
+    if not prospect and email:
+        normalized_email = email.strip().lower()
+        prospect = db.exec(select(Prospect).where(Prospect.email == normalized_email)).first()
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Prospect not found")
+    return prospect
+
+def _upsert_conversation(
+    db: Session,
+    *,
+    prospect_id: int,
+    campaign_key: str,
+    channel: str,
+    provider_thread_id: Optional[str],
+    state: str,
+    message_at: Optional[datetime] = None,
+) -> Conversation:
+    stmt = select(Conversation).where(
+        Conversation.prospect_id == prospect_id,
+        Conversation.channel == channel,
+    )
+    if provider_thread_id:
+        stmt = stmt.where(Conversation.provider_thread_id == provider_thread_id)
+    conversation = db.exec(stmt).first()
+    if not conversation:
+        conversation = Conversation(
+            prospect_id=prospect_id,
+            campaign_key=campaign_key,
+            channel=channel,
+            provider_thread_id=provider_thread_id,
+            state=state,
+            last_message_at=message_at,
+        )
+    else:
+        conversation.campaign_key = campaign_key or conversation.campaign_key
+        if provider_thread_id:
+            conversation.provider_thread_id = provider_thread_id
+        conversation.state = state
+        if message_at:
+            conversation.last_message_at = message_at
+    db.add(conversation)
+    db.flush()
+    return conversation
+
+def _ensure_suppression(
+    db: Session,
+    *,
+    prospect: Prospect,
+    scope: str,
+    reason: str,
+    channel: Optional[str] = None,
+    campaign_key: Optional[str] = None,
+) -> None:
+    existing = db.exec(
+        select(Suppression).where(
+            Suppression.email == prospect.email,
+            Suppression.scope == scope,
+            Suppression.reason == reason,
+            Suppression.campaign_key == campaign_key,
+        )
+    ).first()
+    if existing:
+        return
+    db.add(Suppression(
+        prospect_id=prospect.id,
+        email=prospect.email,
+        scope=scope,
+        reason=reason,
+        channel=channel,
+        campaign_key=campaign_key,
     ))
 
 def _sent_today(db: Session) -> int:
@@ -622,7 +704,7 @@ def assign_sequence(payload: AssignSequenceRequest, db: Session = Depends(get_se
     crud.bulk_assign_sequence_to_prospects(
         db, payload.prospect_ids, payload.sequence_id,
         ventilate_days=payload.ventilate_days or 0,
-        start_date=start
+        start_date=start,
     )
     return {"message": "sequence assigned"}
 
@@ -1324,6 +1406,247 @@ def send_email_to_prospect(data: SendEmailRequest, db: Session = Depends(get_ses
     if result != "sent":
         raise HTTPException(status_code=500, detail="SMTP failed")
     return {"message": "sent"}
+
+
+@app.post(
+    "/integrations/outreach/discoveries",
+    response_model=OutreachDiscoveryIngestResponse,
+    dependencies=[Depends(require_api_key)],
+)
+def ingest_outreach_discoveries(payload: OutreachDiscoveryIngestRequest, db: Session = Depends(get_session)):
+    """Ingest discovered leads from the outreach worker into canonical capture records."""
+    items: list[OutreachDiscoveryResultItem] = []
+    created_or_updated = 0
+    lead_captures_recorded = 0
+
+    for lead in payload.leads:
+        lead_data = _model_dump(lead)
+        external_ref = lead.external_ref or f"{payload.campaign_key}:{lead.email or lead.company or uuid.uuid4().hex}"
+        review_status = "pending_review" if payload.approval_required else "approved"
+        lifecycle_stage = "pending_review" if payload.approval_required else "ready_for_outreach"
+
+        prospect = None
+        action = "lead_capture_only"
+        email = (lead.email or "").strip().lower() or None
+
+        if email:
+            prospect = db.exec(select(Prospect).where(Prospect.email == email)).first()
+            if prospect:
+                action = "updated"
+            else:
+                action = "created"
+                full_name = lead.name or " ".join(part for part in [lead.first_name, lead.last_name] if part).strip() or email
+                prospect = Prospect(name=full_name, email=email)
+
+            if lead.name:
+                prospect.name = lead.name
+            elif not prospect.name and (lead.first_name or lead.last_name):
+                prospect.name = " ".join(part for part in [lead.first_name, lead.last_name] if part).strip()
+            if lead.company:
+                prospect.company = lead.company
+            if lead.title:
+                prospect.title = lead.title
+            if lead.website:
+                prospect.website = lead.website
+            if lead.linkedin:
+                prospect.linkedin = lead.linkedin
+            if lead.notes:
+                prospect.notes = f"{prospect.notes}\n---\n{lead.notes}" if prospect.notes else lead.notes
+            if lead.fact:
+                prospect.notes = f"{prospect.notes}\n---\nFACT: {lead.fact}" if prospect.notes else f"FACT: {lead.fact}"
+            prospect.source_type = "web_discovery"
+            prospect.source_ref = external_ref
+            prospect.lifecycle_stage = lifecycle_stage
+            db.add(prospect)
+            db.flush()
+            created_or_updated += 1
+
+            _record_activity_event(
+                db,
+                prospect_id=prospect.id,
+                campaign_key=payload.campaign_key,
+                event_type="acquire.discovery_ingested",
+                source_module="acquire",
+                payload={"action": action, "approval_required": payload.approval_required},
+            )
+
+        _record_lead_capture(
+            db,
+            prospect_id=prospect.id if prospect else None,
+            source_type="web_discovery",
+            review_status=review_status,
+            raw_payload=lead_data,
+            normalized_payload={
+                "name": lead.name,
+                "email": email,
+                "company": lead.company,
+                "title": lead.title,
+                "website": lead.website,
+                "linkedin": lead.linkedin,
+                "fact": lead.fact,
+                "campaign_key": payload.campaign_key,
+            },
+            external_ref=external_ref,
+        )
+        lead_captures_recorded += 1
+
+        items.append(OutreachDiscoveryResultItem(
+            external_ref=external_ref,
+            prospect_id=prospect.id if prospect else None,
+            email=email,
+            action=action,
+        ))
+
+    db.commit()
+    return OutreachDiscoveryIngestResponse(
+        created_or_updated=created_or_updated,
+        lead_captures_recorded=lead_captures_recorded,
+        items=items,
+    )
+
+
+@app.post("/integrations/outreach/messages/sent", dependencies=[Depends(require_api_key)])
+def ingest_outreach_message_sent(payload: OutreachMessageSentRequest, db: Session = Depends(get_session)):
+    """Ingest an outreach worker send event into canonical conversation and activity records."""
+    prospect = _resolve_prospect_for_outreach(db, prospect_id=payload.prospect_id, email=payload.email)
+
+    sent_at = datetime.fromisoformat(payload.sent_at) if payload.sent_at else datetime.utcnow()
+    prospect.last_contacted_at = sent_at
+    if prospect.lifecycle_stage in {"captured", "pending_review", "ready_for_outreach", "outreach_active"}:
+        prospect.lifecycle_stage = "awaiting_reply"
+    db.add(prospect)
+
+    conversation = _upsert_conversation(
+        db,
+        prospect_id=prospect.id,
+        campaign_key=payload.campaign_key,
+        channel="gmail",
+        provider_thread_id=payload.gmail_thread_id,
+        state="waiting_on_contact",
+        message_at=sent_at,
+    )
+    _record_activity_event(
+        db,
+        prospect_id=prospect.id,
+        campaign_key=payload.campaign_key,
+        event_type="acquire.message_sent",
+        source_module="acquire",
+        payload={
+            "gmail_thread_id": payload.gmail_thread_id,
+            "sequence_step": payload.sequence_step,
+            "subject": payload.subject,
+            "conversation_id": conversation.id,
+        },
+    )
+    db.commit()
+    return {"message": "recorded", "conversation_id": conversation.id}
+
+
+@app.post("/integrations/outreach/replies", dependencies=[Depends(require_api_key)])
+def ingest_outreach_reply(payload: OutreachReplyIngestRequest, db: Session = Depends(get_session)):
+    """Ingest an outreach reply classification into canonical conversation, activity, and suppression records."""
+    prospect = _resolve_prospect_for_outreach(db, prospect_id=payload.prospect_id, email=payload.email)
+
+    received_at = datetime.fromisoformat(payload.received_at) if payload.received_at else datetime.utcnow()
+    stage = map_outreach_reply_intent_to_stage(payload.intent, prospect.lifecycle_stage)
+    if stage and stage != prospect.lifecycle_stage:
+        prospect.lifecycle_stage = stage
+    if payload.intent.upper() == "INTERESTED":
+        prospect.interested_at = received_at
+    if payload.intent.upper() == "UNSUBSCRIBE":
+        prospect.unsubscribed = True
+        _ensure_suppression(
+            db,
+            prospect=prospect,
+            scope="global",
+            reason="unsubscribe",
+            channel="gmail",
+            campaign_key=payload.campaign_key,
+        )
+    db.add(prospect)
+
+    conversation = _upsert_conversation(
+        db,
+        prospect_id=prospect.id,
+        campaign_key=payload.campaign_key,
+        channel="gmail",
+        provider_thread_id=payload.gmail_thread_id,
+        state="waiting_on_us" if payload.intent.upper() != "UNSUBSCRIBE" else "suppressed",
+        message_at=received_at,
+    )
+    _record_activity_event(
+        db,
+        prospect_id=prospect.id,
+        campaign_key=payload.campaign_key,
+        event_type="acquire.reply_received",
+        source_module="acquire",
+        payload={
+            "intent": payload.intent.upper(),
+            "gmail_thread_id": payload.gmail_thread_id,
+            "incoming_message_id": payload.incoming_message_id,
+            "from_email": payload.from_email,
+            "conversation_id": conversation.id,
+        },
+    )
+    db.commit()
+    return {
+        "message": "recorded",
+        "conversation_id": conversation.id,
+        "lifecycle_stage": prospect.lifecycle_stage,
+        "unsubscribed": prospect.unsubscribed,
+    }
+
+
+@app.post("/integrations/outreach/handoffs/nurture", dependencies=[Depends(require_api_key)])
+def handoff_outreach_prospect_to_nurture(payload: OutreachNurtureHandoffRequest, db: Session = Depends(get_session)):
+    """Qualify an acquired prospect and enroll them into a nurture sequence."""
+    prospect = _resolve_prospect_for_outreach(db, prospect_id=payload.prospect_id, email=payload.email)
+    if not db.get(Sequence, payload.sequence_id):
+        raise HTTPException(status_code=404, detail="Sequence not found")
+    if prospect.unsubscribed:
+        raise HTTPException(status_code=409, detail="Prospect has unsubscribed")
+
+    if payload.qualified:
+        prospect.qualified_at = datetime.utcnow()
+    if payload.notes:
+        prospect.notes = f"{prospect.notes}\n---\n{payload.notes}" if prospect.notes else payload.notes
+    db.add(prospect)
+    db.commit()
+
+    start = date.today()
+    if payload.start_date:
+        start = datetime.strptime(payload.start_date, "%Y-%m-%d").date()
+
+    crud.bulk_assign_sequence_to_prospects(
+        db,
+        [prospect.id],
+        payload.sequence_id,
+        ventilate_days=payload.ventilate_days or 0,
+        start_date=start,
+        campaign_key=payload.campaign_key,
+    )
+    db.refresh(prospect)
+    if payload.qualified:
+        prospect.qualified_at = prospect.qualified_at or datetime.utcnow()
+    prospect.lifecycle_stage = "nurture_active"
+    db.add(prospect)
+
+    _record_activity_event(
+        db,
+        prospect_id=prospect.id,
+        sequence_id=payload.sequence_id,
+        campaign_key=payload.campaign_key,
+        event_type="acquire.handoff_to_nurture",
+        source_module="acquire",
+        payload={"qualified": payload.qualified, "sequence_id": payload.sequence_id},
+    )
+    db.commit()
+    return {
+        "message": "handoff completed",
+        "prospect_id": prospect.id,
+        "sequence_id": payload.sequence_id,
+        "lifecycle_stage": prospect.lifecycle_stage,
+    }
 
 
 @app.get("/export/contacts", dependencies=[Depends(require_api_key)])

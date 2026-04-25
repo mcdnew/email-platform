@@ -43,6 +43,14 @@ CONVERSATION_STATES = (
     "suppressed",
 )
 
+OUTREACH_REPLY_INTENTS = (
+    "INTERESTED",
+    "QUESTION",
+    "NOT_NOW",
+    "UNSUBSCRIBE",
+    "OTHER",
+)
+
 LEAD_CAPTURE_REVIEW_STATES = (
     "pending_review",
     "approved",
@@ -82,3 +90,14 @@ def can_transition_contact_stage(current: str, target: str) -> bool:
     if not is_known_contact_stage(current) or not is_known_contact_stage(target):
         return False
     return target in ALLOWED_CONTACT_STAGE_TRANSITIONS[current]
+
+
+def map_outreach_reply_intent_to_stage(intent: str, current: str | None = None) -> str | None:
+    normalized = (intent or "").upper()
+    if normalized == "INTERESTED":
+        return "interested"
+    if normalized in {"QUESTION", "NOT_NOW", "OTHER"}:
+        return "awaiting_reply"
+    if normalized == "UNSUBSCRIBE":
+        return current
+    return None

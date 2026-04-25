@@ -13,6 +13,8 @@ from app.lifecycle import (
 from app.models import (
     Prospect,
     Sequence,
+    SequenceStep,
+    ScheduledEmail,
     Enrollment,
     Suppression,
     ActivityEvent,
@@ -194,3 +196,181 @@ def test_asset_upload_endpoints_create_asset_records(client, db, tmp_path, monke
 
     events = db.exec(select(ActivityEvent).where(ActivityEvent.prospect_id == prospect.id)).all()
     assert sum(1 for event in events if event.event_type == "asset.uploaded") == 2
+
+
+def test_outreach_discovery_ingest_creates_prospects_and_lead_captures(client, db):
+    resp = client.post(
+        "/integrations/outreach/discoveries",
+        json={
+            "campaign_key": "acquire:lumber",
+            "approval_required": True,
+            "leads": [
+                {
+                    "name": "Dana Discovery",
+                    "email": "dana@example.com",
+                    "company": "North Mill",
+                    "title": "Owner",
+                    "fact": "Expanding yard in 2026",
+                    "external_ref": "disc-1",
+                },
+                {
+                    "name": "No Email Lead",
+                    "company": "Unknown Timber",
+                    "external_ref": "disc-2",
+                },
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["created_or_updated"] == 1
+    assert data["lead_captures_recorded"] == 2
+
+    prospect = db.exec(select(Prospect).where(Prospect.email == "dana@example.com")).first()
+    assert prospect is not None
+    assert prospect.source_type == "web_discovery"
+    assert prospect.lifecycle_stage == "pending_review"
+
+    captures = db.exec(select(LeadCapture).order_by(LeadCapture.external_ref)).all()
+    assert len(captures) == 2
+    assert captures[0].prospect_id == prospect.id
+    assert captures[1].prospect_id is None
+
+    event = db.exec(select(ActivityEvent).where(ActivityEvent.prospect_id == prospect.id)).first()
+    assert event is not None
+    assert event.event_type == "acquire.discovery_ingested"
+
+
+def test_outreach_message_and_reply_ingest_update_conversation_and_suppression(client, db):
+    prospect = Prospect(
+        name="Reply User",
+        email="reply@example.com",
+        lifecycle_stage="ready_for_outreach",
+        source_type="web_discovery",
+    )
+    db.add(prospect)
+    db.commit()
+    db.refresh(prospect)
+
+    sent_resp = client.post(
+        "/integrations/outreach/messages/sent",
+        json={
+            "prospect_id": prospect.id,
+            "campaign_key": "acquire:lumber",
+            "gmail_thread_id": "thread-777",
+            "sequence_step": 1,
+            "subject": "Quick question",
+            "body": "Hello there",
+        },
+    )
+    assert sent_resp.status_code == 200
+
+    db.refresh(prospect)
+    assert prospect.lifecycle_stage == "awaiting_reply"
+    assert prospect.last_contacted_at is not None
+
+    reply_resp = client.post(
+        "/integrations/outreach/replies",
+        json={
+            "prospect_id": prospect.id,
+            "campaign_key": "acquire:lumber",
+            "intent": "INTERESTED",
+            "body": "Tell me more",
+            "gmail_thread_id": "thread-777",
+            "incoming_message_id": "msg-1",
+            "from_email": "reply@example.com",
+        },
+    )
+    assert reply_resp.status_code == 200
+    reply_data = reply_resp.json()
+    assert reply_data["lifecycle_stage"] == "interested"
+
+    db.refresh(prospect)
+    assert prospect.interested_at is not None
+
+    conversation = db.exec(select(Conversation).where(Conversation.prospect_id == prospect.id)).first()
+    assert conversation is not None
+    assert conversation.provider_thread_id == "thread-777"
+    assert conversation.state == "waiting_on_us"
+
+    events = db.exec(select(ActivityEvent).where(ActivityEvent.prospect_id == prospect.id)).all()
+    event_types = {event.event_type for event in events}
+    assert "acquire.message_sent" in event_types
+    assert "acquire.reply_received" in event_types
+
+    unsubscribe_resp = client.post(
+        "/integrations/outreach/replies",
+        json={
+            "prospect_id": prospect.id,
+            "campaign_key": "acquire:lumber",
+            "intent": "UNSUBSCRIBE",
+            "body": "Please stop",
+            "gmail_thread_id": "thread-777",
+        },
+    )
+    assert unsubscribe_resp.status_code == 200
+
+    db.refresh(prospect)
+    assert prospect.unsubscribed is True
+    suppression = db.exec(select(Suppression).where(Suppression.email == prospect.email)).first()
+    assert suppression is not None
+    assert suppression.reason == "unsubscribe"
+
+
+def test_sequence_assignment_creates_enrollment_and_handoff_promotes_to_nurture(client, db):
+    prospect = Prospect(
+        name="Nurture User",
+        email="nurture@example.com",
+        lifecycle_stage="qualified",
+        source_type="web_discovery",
+    )
+    sequence = Sequence(name="Welcome Nurture")
+    db.add(prospect)
+    db.add(sequence)
+    db.commit()
+    db.refresh(prospect)
+    db.refresh(sequence)
+
+    template_resp = client.post("/templates", json={"name": "Intro", "subject": "Hi", "body": "Hello"})
+    assert template_resp.status_code == 200
+    template_id = template_resp.json()["id"]
+
+    step = SequenceStep(sequence_id=sequence.id, template_id=template_id, delay_days=0)
+    db.add(step)
+    db.commit()
+
+    handoff_resp = client.post(
+        "/integrations/outreach/handoffs/nurture",
+        json={
+            "prospect_id": prospect.id,
+            "campaign_key": "acquire:lumber",
+            "sequence_id": sequence.id,
+            "qualified": True,
+            "notes": "Warm handoff from outreach",
+        },
+    )
+    assert handoff_resp.status_code == 200
+    handoff = handoff_resp.json()
+    assert handoff["lifecycle_stage"] == "nurture_active"
+
+    db.refresh(prospect)
+    assert prospect.lifecycle_stage == "nurture_active"
+    assert prospect.qualified_at is not None
+    assert "Warm handoff from outreach" in (prospect.notes or "")
+
+    enrollment = db.exec(select(Enrollment).where(Enrollment.prospect_id == prospect.id)).first()
+    assert enrollment is not None
+    assert enrollment.sequence_id == sequence.id
+    assert enrollment.status == "active"
+    assert enrollment.campaign_key == "acquire:lumber"
+
+    scheduled = db.exec(select(ScheduledEmail).where(ScheduledEmail.prospect_id == prospect.id)).all()
+    assert len(scheduled) == 1
+
+    handoff_event = db.exec(
+        select(ActivityEvent).where(
+            ActivityEvent.prospect_id == prospect.id,
+            ActivityEvent.event_type == "acquire.handoff_to_nurture",
+        )
+    ).first()
+    assert handoff_event is not None

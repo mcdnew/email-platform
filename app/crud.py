@@ -15,6 +15,7 @@ from app.models import (
     SequenceStep,
     ScheduledEmail,
     SentEmail,
+    Enrollment,
     EmailTemplateUpdate,
 )
 from app.config import settings
@@ -159,6 +160,7 @@ def bulk_assign_sequence_to_prospects(
     sequence_id: int,
     ventilate_days: int = 0,
     start_date: date | None = None,
+    campaign_key: str | None = None,
 ):
     """
     Assign *sequence_id* to each prospect in *prospect_ids* and create
@@ -189,10 +191,43 @@ def bulk_assign_sequence_to_prospects(
 
         # attach sequence
         prospect.sequence_id = sequence_id
+        if prospect.lifecycle_stage in {"captured", "pending_review", "ready_for_outreach", "qualified"}:
+            prospect.lifecycle_stage = "nurture_active"
         session.add(prospect)
 
         # purge any old schedule
         session.exec(delete(ScheduledEmail).where(ScheduledEmail.prospect_id == pid))
+        existing_enrollments = session.exec(
+            select(Enrollment).where(
+                Enrollment.prospect_id == pid,
+                Enrollment.status.in_(["draft", "active", "paused"]),
+            )
+        ).all()
+        for enrollment in existing_enrollments:
+            if enrollment.sequence_id == sequence_id:
+                enrollment.status = "active"
+                enrollment.current_step = 0
+                enrollment.entered_at = datetime.utcnow()
+                enrollment.paused_at = None
+                enrollment.completed_at = None
+                enrollment.exit_reason = None
+                if campaign_key:
+                    enrollment.campaign_key = campaign_key
+                session.add(enrollment)
+            else:
+                enrollment.status = "cancelled"
+                enrollment.completed_at = datetime.utcnow()
+                enrollment.exit_reason = "reassigned"
+                session.add(enrollment)
+
+        if not any(enrollment.sequence_id == sequence_id for enrollment in existing_enrollments):
+            session.add(Enrollment(
+                prospect_id=pid,
+                sequence_id=sequence_id,
+                campaign_key=campaign_key,
+                status="active",
+                current_step=0,
+            ))
 
         # schedule each step
         for step in steps:
@@ -214,4 +249,3 @@ def bulk_assign_sequence_to_prospects(
             session.add(sched)
 
     session.commit()
-
