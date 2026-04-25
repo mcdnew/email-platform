@@ -984,7 +984,8 @@ def update_smtp_settings(payload: SmtpSettingsPayload, db: Session = Depends(get
 
 # ────────────── Business Card API (mobile app) ──────────────
 
-CARD_IMAGES_DIR = os.getenv("CARD_IMAGES_DIR", "card_images")
+CARD_IMAGES_DIR  = os.getenv("CARD_IMAGES_DIR",  "card_images")
+VOICE_NOTES_DIR  = os.getenv("VOICE_NOTES_DIR",  "voice_notes")
 
 @app.post("/prospects/upsert", response_model=BusinessCardUpsertResponse, dependencies=[Depends(require_api_key)])
 def upsert_prospect(data: BusinessCardUpsert, db: Session = Depends(get_session)):
@@ -1074,6 +1075,150 @@ async def upload_card_image(pid: int, file: UploadFile = File(...), db: Session 
     db.commit()
 
     return {"path": filepath}
+
+
+@app.post("/prospects/{pid}/voice-note", dependencies=[Depends(require_api_key)])
+async def upload_voice_note(pid: int, file: UploadFile = File(...), db: Session = Depends(get_session)):
+    """Store a voice note audio file and append a reference to the prospect's voice_notes array."""
+    prospect = db.get(Prospect, pid)
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Prospect not found")
+
+    os.makedirs(VOICE_NOTES_DIR, exist_ok=True)
+
+    ext = os.path.splitext(file.filename or "note.m4a")[1] or ".m4a"
+    filename = f"{pid}_{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join(VOICE_NOTES_DIR, filename)
+
+    with open(filepath, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    existing: list = []
+    if prospect.voice_notes:
+        try:
+            existing = json.loads(prospect.voice_notes)
+        except (json.JSONDecodeError, TypeError):
+            existing = []
+    existing.append({"file": filepath, "recorded_at": datetime.utcnow().isoformat()})
+    prospect.voice_notes = json.dumps(existing)
+    db.add(prospect)
+    db.commit()
+
+    return {"path": filepath}
+
+
+class SendEmailRequest(BaseModel):
+    prospect_id: int
+    email: str
+    template_id: int
+
+
+@app.post("/send-email", dependencies=[Depends(require_api_key)])
+def send_email_to_prospect(data: SendEmailRequest, db: Session = Depends(get_session)):
+    """Send a single email to a prospect immediately (manual trigger from mobile app)."""
+    prospect = db.get(Prospect, data.prospect_id)
+    template  = db.get(EmailTemplate, data.template_id)
+
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Prospect not found")
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if prospect.unsubscribed:
+        raise HTTPException(status_code=409, detail="Prospect has unsubscribed")
+
+    ctx = {
+        "name":    prospect.name,
+        "email":   prospect.email,
+        "company": prospect.company or "",
+        "title":   prospect.title or "",
+    }
+
+    smtp_row = db.get(SmtpSettings, 1)
+    smtp_override = None
+    if smtp_row:
+        smtp_override = {
+            "smtp_server":   smtp_row.smtp_server,
+            "smtp_port":     smtp_row.smtp_port,
+            "smtp_user":     smtp_row.smtp_user,
+            "smtp_password": smtp_row.smtp_password,
+        }
+
+    sent_record = SentEmail(
+        to=prospect.email,
+        subject=template.subject,
+        body=template.body,
+        sent_at=datetime.utcnow(),
+        status="sending",
+        prospect_id=prospect.id,
+        template_id=template.id,
+    )
+    db.add(sent_record)
+    db.flush()
+
+    result = send_email(
+        to_email=prospect.email,
+        subject=template.subject,
+        body=template.body,
+        context=ctx,
+        email_id=sent_record.id,
+        smtp_override=smtp_override,
+    )
+
+    sent_record.status = result
+    db.add(sent_record)
+    db.commit()
+
+    if result != "sent":
+        raise HTTPException(status_code=500, detail="SMTP failed")
+    return {"message": "sent"}
+
+
+@app.get("/export/contacts", dependencies=[Depends(require_api_key)])
+def export_contacts(format: str = "csv", db: Session = Depends(get_session)):
+    """Export all prospects as CSV, JSON, or VCF (called by the mobile app download feature)."""
+    prospects = db.exec(select(Prospect).order_by(Prospect.name)).all()
+
+    if format == "json":
+        return [p.dict() for p in prospects]
+
+    if format in ("vcf", "vcard"):
+        lines = []
+        for p in prospects:
+            lines += [
+                "BEGIN:VCARD", "VERSION:3.0",
+                f"FN:{p.name or ''}",
+                f"EMAIL:{p.email}",
+                f"ORG:{p.company or ''}",
+                f"TITLE:{p.title or ''}",
+                f"TEL:{p.phone or ''}",
+                f"URL:{p.website or ''}",
+                "END:VCARD",
+            ]
+        content = "\r\n".join(lines)
+        return StreamingResponse(
+            io.BytesIO(content.encode()),
+            media_type="text/vcard",
+            headers={"Content-Disposition": "attachment; filename=contacts.vcf"},
+        )
+
+    # Default: CSV
+    import csv as csv_mod
+    output = io.StringIO()
+    writer = csv_mod.writer(output, quoting=csv_mod.QUOTE_ALL)
+    writer.writerow(["name", "email", "phone", "company", "title", "website", "address", "linkedin", "tags", "notes", "created_at"])
+    for p in prospects:
+        writer.writerow([
+            p.name or "", p.email, p.phone or "", p.company or "",
+            p.title or "", p.website or "", p.address or "", p.linkedin or "",
+            p.tags or "", p.notes or "",
+            p.created_at.isoformat() if p.created_at else "",
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=contacts.csv"},
+    )
 
 
 @app.get("/binder/pdf", dependencies=[Depends(require_api_key)])

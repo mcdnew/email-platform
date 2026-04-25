@@ -24,6 +24,8 @@ services:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-email_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-email_platform}"
     volumes:
       - ./logs:/app/logs
+      - card_images:/app/card_images
+      - voice_notes:/app/voice_notes
 
   frontend:
     build:
@@ -40,6 +42,8 @@ services:
 
 volumes:
   db_data:
+  card_images:
+  voice_notes:
 
 
 ## usage:
