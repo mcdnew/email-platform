@@ -514,3 +514,38 @@ def test_acquisition_campaign_summary_aggregates_core_records(client, db):
     assert data[0]["interested"] == 1
     assert data[0]["conversations"] == 1
     assert data[0]["recent_events"] == 1
+
+
+def test_worker_campaigns_proxy_returns_json(client, monkeypatch):
+    import app.main as app_main
+
+    class DummyResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{
+                "name": "alpha",
+                "product": "TallyExpress",
+                "language": "en",
+                "discover_prompt": "yards",
+                "discover_count": 15,
+                "approval_required": True,
+                "active": 2,
+                "interested": 1,
+                "emails_sent": 8,
+                "running": False,
+                "started": None,
+                "error": None,
+            }]
+
+    def fake_get(url: str, timeout: int):
+        assert url.endswith("/api/campaigns")
+        assert timeout == 5
+        return DummyResponse()
+
+    monkeypatch.setattr(app_main.requests, "get", fake_get)
+    resp = client.get("/acquire/worker/campaigns")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["name"] == "alpha"

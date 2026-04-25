@@ -219,3 +219,18 @@ class AcquisitionCampaignSummaryRead(BaseModel):
     interested: int
     conversations: int
     recent_events: int
+
+
+class WorkerCampaignRead(BaseModel):
+    name: str
+    product: str
+    language: str
+    discover_prompt: str
+    discover_count: int
+    approval_required: bool
+    active: int
+    interested: int
+    emails_sent: int
+    running: bool
+    started: Optional[str] = None
+    error: Optional[str] = None

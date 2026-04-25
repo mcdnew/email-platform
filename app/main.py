@@ -4,6 +4,7 @@ import io
 import json
 import os
 import logging
+import requests
 import shutil
 import uuid
 from datetime import datetime, date, time
@@ -32,6 +33,7 @@ from app.schemas import (
     LeadCaptureReviewRequest, LeadCaptureRead, ActivityEventRead, ConversationRead,
     ProspectLifecycleActionRequest,
     AcquisitionCampaignSummaryRead,
+    WorkerCampaignRead,
 )
 from app.mailer import send_email
 from app.config import settings
@@ -194,6 +196,9 @@ def _record_asset(
         content_type=content_type,
         original_filename=original_filename,
     ))
+
+def _worker_base_url() -> str:
+    return os.getenv("WORKER_BASE_URL", "http://worker:5000").rstrip("/")
 
 def _resolve_prospect_for_outreach(
     db: Session,
@@ -1839,6 +1844,16 @@ def acquisition_campaign_summary(db: Session = Depends(get_session)):
             )
         )
     return summaries
+
+
+@app.get("/acquire/worker/campaigns", response_model=List[WorkerCampaignRead], dependencies=[Depends(require_api_key)])
+def acquisition_worker_campaigns():
+    try:
+        res = requests.get(f"{_worker_base_url()}/api/campaigns", timeout=5)
+        res.raise_for_status()
+        return res.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
 
 
 @app.get("/export/contacts", dependencies=[Depends(require_api_key)])

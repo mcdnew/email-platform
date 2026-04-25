@@ -58,6 +58,21 @@ export interface AcquisitionCampaignSummary {
   recent_events: number
 }
 
+export interface WorkerCampaign {
+  name: string
+  product: string
+  language: string
+  discover_prompt: string
+  discover_count: number
+  approval_required: boolean
+  active: number
+  interested: number
+  emails_sent: number
+  running: boolean
+  started: string | null
+  error: string | null
+}
+
 export interface ProspectCreate {
   name: string
   email: string

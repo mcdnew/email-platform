@@ -4,7 +4,7 @@
 import type {
   Prospect, ProspectCreate, EmailTemplate, Sequence, SequenceStep,
   ScheduledEmail, SentEmail, AnalyticsSummary, PaginatedResponse, BulkImportResult, LeadCapture,
-  ActivityEvent, Conversation, AcquisitionCampaignSummary,
+  ActivityEvent, Conversation, AcquisitionCampaignSummary, WorkerCampaign,
 } from './types'
 
 async function req<T>(
@@ -223,3 +223,6 @@ export const updateProspectLifecycle = (id: number, data: { target_stage: string
 
 export const getAcquisitionCampaignSummaries = () =>
   req<AcquisitionCampaignSummary[]>('/acquire/campaigns/summary')
+
+export const getWorkerCampaigns = () =>
+  req<WorkerCampaign[]>('/acquire/worker/campaigns')

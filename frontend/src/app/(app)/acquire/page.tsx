@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getAcquisitionCampaignSummaries, getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, handoffOutreachToNurture, reviewLeadCapture } from '@/lib/api'
+import { getAcquisitionCampaignSummaries, getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, getWorkerCampaigns, handoffOutreachToNurture, reviewLeadCapture } from '@/lib/api'
 
 function parseJson(value: string | null): Record<string, unknown> {
   if (!value) return {}
@@ -36,6 +36,10 @@ export default function AcquirePage() {
   const { data: campaignSummaries, isLoading: campaignSummariesLoading } = useQuery({
     queryKey: ['acquisition-campaign-summaries'],
     queryFn: getAcquisitionCampaignSummaries,
+  })
+  const { data: workerCampaigns, isLoading: workerCampaignsLoading } = useQuery({
+    queryKey: ['worker-campaigns'],
+    queryFn: getWorkerCampaigns,
   })
   const { data: sequences, isLoading: sequencesLoading } = useQuery({
     queryKey: ['sequences'],
@@ -97,6 +101,40 @@ export default function AcquirePage() {
                   <span>Conversations</span><span className="text-right">{summary.conversations}</span>
                   <span>Events</span><span className="text-right">{summary.recent_events}</span>
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">Worker Campaigns</h2>
+          <span className="text-xs text-gray-400">{workerCampaigns?.length ?? 0} mirrored configs</span>
+        </div>
+        {workerCampaignsLoading ? (
+          <p className="text-sm text-gray-500">Loading…</p>
+        ) : !workerCampaigns?.length ? (
+          <p className="text-sm text-gray-500">No worker campaign metadata available.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {workerCampaigns.map((campaign) => (
+              <div key={campaign.name} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{campaign.name}</div>
+                  <span className={`text-[11px] uppercase tracking-wide ${campaign.running ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
+                    {campaign.running ? 'running' : 'idle'}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-gray-500">{campaign.product}</div>
+                <div className="mt-2 text-[11px] text-gray-500 line-clamp-3">{campaign.discover_prompt}</div>
+                <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500">
+                  <span>Language</span><span className="text-right">{campaign.language}</span>
+                  <span>Discover count</span><span className="text-right">{campaign.discover_count}</span>
+                  <span>Active</span><span className="text-right">{campaign.active}</span>
+                  <span>Interested</span><span className="text-right">{campaign.interested}</span>
+                </div>
+                {campaign.error && <div className="mt-2 text-[11px] text-red-500">{campaign.error}</div>}
               </div>
             ))}
           </div>
