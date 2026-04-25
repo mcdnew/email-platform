@@ -234,3 +234,7 @@ class WorkerCampaignRead(BaseModel):
     running: bool
     started: Optional[str] = None
     error: Optional[str] = None
+
+
+class WorkerCampaignRunRequest(BaseModel):
+    dry_run: bool = False

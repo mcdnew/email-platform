@@ -34,6 +34,7 @@ from app.schemas import (
     ProspectLifecycleActionRequest,
     AcquisitionCampaignSummaryRead,
     WorkerCampaignRead,
+    WorkerCampaignRunRequest,
 )
 from app.mailer import send_email
 from app.config import settings
@@ -1852,6 +1853,32 @@ def acquisition_worker_campaigns():
         res = requests.get(f"{_worker_base_url()}/api/campaigns", timeout=5)
         res.raise_for_status()
         return res.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
+
+
+@app.post("/acquire/worker/campaigns/{campaign_name}/run", dependencies=[Depends(require_api_key)])
+def run_worker_campaign(campaign_name: str, payload: WorkerCampaignRunRequest, db: Session = Depends(get_session)):
+    try:
+        res = requests.post(
+            f"{_worker_base_url()}/api/campaigns/{campaign_name}/run",
+            json={"dry_run": payload.dry_run},
+            timeout=5,
+        )
+        if res.status_code >= 400:
+            detail = res.json().get("error", res.text)
+            raise HTTPException(status_code=res.status_code, detail=detail)
+        _record_activity_event(
+            db,
+            campaign_key=campaign_name,
+            event_type="acquire.worker_run_requested",
+            source_module="ops",
+            payload={"dry_run": payload.dry_run},
+        )
+        db.commit()
+        return res.json()
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
 

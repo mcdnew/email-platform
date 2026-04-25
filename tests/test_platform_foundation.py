@@ -549,3 +549,30 @@ def test_worker_campaigns_proxy_returns_json(client, monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data[0]["name"] == "alpha"
+
+
+def test_worker_campaign_run_proxy_records_activity(client, db, monkeypatch):
+    import app.main as app_main
+
+    class DummyResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"message": "started", "campaign": "alpha", "dry_run": True}
+
+    def fake_post(url: str, json: dict, timeout: int):
+        assert url.endswith("/api/campaigns/alpha/run")
+        assert json == {"dry_run": True}
+        assert timeout == 5
+        return DummyResponse()
+
+    monkeypatch.setattr(app_main.requests, "post", fake_post)
+    resp = client.post("/acquire/worker/campaigns/alpha/run", json={"dry_run": True})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["campaign"] == "alpha"
+
+    event = db.exec(select(ActivityEvent).where(ActivityEvent.event_type == "acquire.worker_run_requested")).first()
+    assert event is not None
+    assert event.campaign_key == "alpha"

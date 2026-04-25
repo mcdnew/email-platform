@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getAcquisitionCampaignSummaries, getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, getWorkerCampaigns, handoffOutreachToNurture, reviewLeadCapture } from '@/lib/api'
+import { getAcquisitionCampaignSummaries, getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, getWorkerCampaigns, handoffOutreachToNurture, reviewLeadCapture, runWorkerCampaign } from '@/lib/api'
 
 function parseJson(value: string | null): Record<string, unknown> {
   if (!value) return {}
@@ -71,6 +71,16 @@ export default function AcquirePage() {
       ])
     },
   })
+  const runCampaignMutation = useMutation({
+    mutationFn: ({ campaignName, dryRun }: { campaignName: string; dryRun: boolean }) =>
+      runWorkerCampaign(campaignName, { dry_run: dryRun }),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['worker-campaigns'] }),
+        qc.invalidateQueries({ queryKey: ['activity-events'] }),
+      ])
+    },
+  })
 
   return (
     <div className="p-6 space-y-6">
@@ -133,6 +143,22 @@ export default function AcquirePage() {
                   <span>Discover count</span><span className="text-right">{campaign.discover_count}</span>
                   <span>Active</span><span className="text-right">{campaign.active}</span>
                   <span>Interested</span><span className="text-right">{campaign.interested}</span>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => runCampaignMutation.mutate({ campaignName: campaign.name, dryRun: false })}
+                    className="px-2.5 py-1.5 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                    disabled={runCampaignMutation.isPending || campaign.running}
+                  >
+                    Run
+                  </button>
+                  <button
+                    onClick={() => runCampaignMutation.mutate({ campaignName: campaign.name, dryRun: true })}
+                    className="px-2.5 py-1.5 text-xs rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+                    disabled={runCampaignMutation.isPending || campaign.running}
+                  >
+                    Dry run
+                  </button>
                 </div>
                 {campaign.error && <div className="mt-2 text-[11px] text-red-500">{campaign.error}</div>}
               </div>
