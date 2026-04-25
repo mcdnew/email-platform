@@ -172,6 +172,27 @@ class LeadCapture(SQLModel, table=True):
     reviewed_at: Optional[datetime] = None
 
 
+class WorkerCampaignSnapshot(SQLModel, table=True):
+    """Cached worker campaign definition and runtime summary mirrored into the core platform."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True)
+    product: Optional[str] = None
+    language: Optional[str] = None
+    discover_prompt: Optional[str] = None
+    discover_count: Optional[int] = None
+    approval_required: bool = Field(default=True)
+    active: int = Field(default=0)
+    interested: int = Field(default=0)
+    emails_sent: int = Field(default=0)
+    running: bool = Field(default=False)
+    started: Optional[str] = None
+    error: Optional[str] = None
+    config_json: Optional[str] = None
+    stats_json: Optional[str] = None
+    synced_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class EmailTemplateUpdate(SQLModel):
     name: Optional[str] = None
     subject: Optional[str] = None

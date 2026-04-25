@@ -24,6 +24,7 @@ from app.models import (
     Prospect, EmailTemplate, Sequence, SequenceStep,
     ScheduledEmail, SentEmail, SmtpSettings,
     ActivityEvent, Asset, Conversation, LeadCapture, Suppression,
+    WorkerCampaignSnapshot,
 )
 from app.schemas import (
     AssignSequenceRequest, SequenceCreate, SequenceRead, TestEmailRequest,
@@ -37,6 +38,7 @@ from app.schemas import (
     WorkerCampaignRunRequest,
     WorkerCampaignDetailRead,
     WorkerCampaignUpdateRequest,
+    WorkerCampaignSnapshotRead,
 )
 from app.mailer import send_email
 from app.config import settings
@@ -202,6 +204,42 @@ def _record_asset(
 
 def _worker_base_url() -> str:
     return os.getenv("WORKER_BASE_URL", "http://worker:5000").rstrip("/")
+
+
+def _upsert_worker_campaign_snapshot(db: Session, payload: dict) -> WorkerCampaignSnapshot:
+    name = payload.get("name")
+    if not name:
+        raise ValueError("worker campaign payload missing name")
+
+    snapshot = db.exec(select(WorkerCampaignSnapshot).where(WorkerCampaignSnapshot.name == name)).first()
+    if not snapshot:
+        snapshot = WorkerCampaignSnapshot(name=name)
+
+    config = payload.get("config") or {}
+    stats = payload.get("stats") or {}
+    discover = config.get("discover", {}) if isinstance(config, dict) else {}
+    campaign = config.get("campaign", {}) if isinstance(config, dict) else {}
+
+    snapshot.product = payload.get("product") or campaign.get("product")
+    snapshot.language = payload.get("language") or campaign.get("language")
+    snapshot.discover_prompt = payload.get("discover_prompt") or discover.get("prompt")
+    snapshot.discover_count = payload.get("discover_count") or discover.get("count")
+    approval = payload.get("approval_required")
+    if approval is None:
+        approval = discover.get("approval", "required") == "required"
+    snapshot.approval_required = bool(approval)
+    snapshot.active = int(payload.get("active", stats.get("statuses", {}).get("active", 0) if isinstance(stats, dict) else 0) or 0)
+    snapshot.interested = int(payload.get("interested", stats.get("statuses", {}).get("interested", 0) if isinstance(stats, dict) else 0) or 0)
+    snapshot.emails_sent = int(payload.get("emails_sent", stats.get("emails_sent", 0) if isinstance(stats, dict) else 0) or 0)
+    snapshot.running = bool(payload.get("running", False))
+    snapshot.started = payload.get("started")
+    snapshot.error = payload.get("error")
+    snapshot.config_json = json.dumps(config) if config else None
+    snapshot.stats_json = json.dumps(stats) if stats else None
+    snapshot.synced_at = datetime.utcnow()
+    db.add(snapshot)
+    db.flush()
+    return snapshot
 
 def _resolve_prospect_for_outreach(
     db: Session,
@@ -1850,12 +1888,36 @@ def acquisition_campaign_summary(db: Session = Depends(get_session)):
 
 
 @app.get("/acquire/worker/campaigns", response_model=List[WorkerCampaignRead], dependencies=[Depends(require_api_key)])
-def acquisition_worker_campaigns():
+def acquisition_worker_campaigns(db: Session = Depends(get_session)):
     try:
         res = requests.get(f"{_worker_base_url()}/api/campaigns", timeout=5)
         res.raise_for_status()
-        return res.json()
+        payload = res.json()
+        if isinstance(payload, list):
+            for item in payload:
+                _upsert_worker_campaign_snapshot(db, item)
+            db.commit()
+        return payload
     except Exception as exc:
+        cached = db.exec(select(WorkerCampaignSnapshot).order_by(WorkerCampaignSnapshot.name)).all()
+        if cached:
+            return [
+                WorkerCampaignRead(
+                    name=item.name,
+                    product=item.product or "",
+                    language=item.language or "",
+                    discover_prompt=item.discover_prompt or "",
+                    discover_count=item.discover_count or 0,
+                    approval_required=item.approval_required,
+                    active=item.active,
+                    interested=item.interested,
+                    emails_sent=item.emails_sent,
+                    running=item.running,
+                    started=item.started,
+                    error=item.error,
+                )
+                for item in cached
+            ]
         raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
 
 
@@ -1870,6 +1932,13 @@ def run_worker_campaign(campaign_name: str, payload: WorkerCampaignRunRequest, d
         if res.status_code >= 400:
             detail = res.json().get("error", res.text)
             raise HTTPException(status_code=res.status_code, detail=detail)
+        snapshot = db.exec(select(WorkerCampaignSnapshot).where(WorkerCampaignSnapshot.name == campaign_name)).first()
+        if snapshot:
+            snapshot.running = True
+            snapshot.started = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+            snapshot.error = None
+            snapshot.synced_at = datetime.utcnow()
+            db.add(snapshot)
         _record_activity_event(
             db,
             campaign_key=campaign_name,
@@ -1886,7 +1955,7 @@ def run_worker_campaign(campaign_name: str, payload: WorkerCampaignRunRequest, d
 
 
 @app.get("/acquire/worker/campaigns/{campaign_name}", response_model=WorkerCampaignDetailRead, dependencies=[Depends(require_api_key)])
-def worker_campaign_detail(campaign_name: str):
+def worker_campaign_detail(campaign_name: str, db: Session = Depends(get_session)):
     try:
         res = requests.get(f"{_worker_base_url()}/api/campaigns/{campaign_name}", timeout=5)
         if res.status_code == 404:
@@ -1894,10 +1963,23 @@ def worker_campaign_detail(campaign_name: str):
         if res.status_code >= 400:
             detail = res.json().get("error", res.text)
             raise HTTPException(status_code=res.status_code, detail=detail)
-        return res.json()
+        payload = res.json()
+        _upsert_worker_campaign_snapshot(db, payload)
+        db.commit()
+        return payload
     except HTTPException:
         raise
     except Exception as exc:
+        cached = db.exec(select(WorkerCampaignSnapshot).where(WorkerCampaignSnapshot.name == campaign_name)).first()
+        if cached:
+            return WorkerCampaignDetailRead(
+                name=cached.name,
+                config=json.loads(cached.config_json) if cached.config_json else {},
+                stats=json.loads(cached.stats_json) if cached.stats_json else {},
+                running=cached.running,
+                started=cached.started,
+                error=cached.error,
+            )
         raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
 
 
@@ -1914,12 +1996,19 @@ def update_worker_campaign(campaign_name: str, payload: WorkerCampaignUpdateRequ
         if res.status_code >= 400:
             detail = res.json().get("error", res.text)
             raise HTTPException(status_code=res.status_code, detail=detail)
+        snapshot = _upsert_worker_campaign_snapshot(
+            db,
+            {
+                "name": campaign_name,
+                "config": payload.config,
+            },
+        )
         _record_activity_event(
             db,
             campaign_key=campaign_name,
             event_type="acquire.worker_campaign_updated",
             source_module="ops",
-            payload={},
+            payload={"snapshot_id": snapshot.id},
         )
         db.commit()
         return res.json()
@@ -1927,6 +2016,11 @@ def update_worker_campaign(campaign_name: str, payload: WorkerCampaignUpdateRequ
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
+
+
+@app.get("/acquire/worker/campaigns/cache", response_model=List[WorkerCampaignSnapshotRead], dependencies=[Depends(require_api_key)])
+def worker_campaign_snapshots(db: Session = Depends(get_session)):
+    return db.exec(select(WorkerCampaignSnapshot).order_by(WorkerCampaignSnapshot.name)).all()
 
 
 @app.get("/export/contacts", dependencies=[Depends(require_api_key)])

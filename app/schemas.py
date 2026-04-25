@@ -251,3 +251,21 @@ class WorkerCampaignDetailRead(BaseModel):
 
 class WorkerCampaignUpdateRequest(BaseModel):
     config: dict
+
+
+class WorkerCampaignSnapshotRead(BaseModel):
+    name: str
+    product: Optional[str] = None
+    language: Optional[str] = None
+    discover_prompt: Optional[str] = None
+    discover_count: Optional[int] = None
+    approval_required: bool
+    active: int
+    interested: int
+    emails_sent: int
+    running: bool
+    started: Optional[str] = None
+    error: Optional[str] = None
+    config_json: Optional[str] = None
+    stats_json: Optional[str] = None
+    synced_at: datetime

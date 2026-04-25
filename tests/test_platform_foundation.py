@@ -21,6 +21,7 @@ from app.models import (
     Conversation,
     Asset,
     LeadCapture,
+    WorkerCampaignSnapshot,
 )
 
 
@@ -636,3 +637,63 @@ def test_worker_campaign_update_proxy_records_activity(client, db, monkeypatch):
     event = db.exec(select(ActivityEvent).where(ActivityEvent.event_type == "acquire.worker_campaign_updated")).first()
     assert event is not None
     assert event.campaign_key == "alpha"
+
+
+def test_worker_campaign_list_falls_back_to_cached_snapshots(client, db, monkeypatch):
+    db.add(WorkerCampaignSnapshot(
+        name="alpha",
+        product="TallyExpress",
+        language="en",
+        discover_prompt="yards",
+        discover_count=12,
+        approval_required=True,
+        active=2,
+        interested=1,
+        emails_sent=9,
+        running=False,
+        config_json='{"campaign":{"product":"TallyExpress"}}',
+        stats_json='{"emails_sent":9}',
+    ))
+    db.commit()
+
+    import app.main as app_main
+
+    def failing_get(url: str, timeout: int):
+        raise RuntimeError("worker down")
+
+    monkeypatch.setattr(app_main.requests, "get", failing_get)
+    resp = client.get("/acquire/worker/campaigns")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert len(payload) == 1
+    assert payload[0]["name"] == "alpha"
+
+
+def test_worker_campaign_detail_falls_back_to_cached_snapshot(client, db, monkeypatch):
+    db.add(WorkerCampaignSnapshot(
+        name="alpha",
+        product="TallyExpress",
+        language="en",
+        discover_prompt="yards",
+        discover_count=12,
+        approval_required=True,
+        active=2,
+        interested=1,
+        emails_sent=9,
+        running=False,
+        config_json='{"campaign":{"product":"TallyExpress"}}',
+        stats_json='{"emails_sent":9}',
+    ))
+    db.commit()
+
+    import app.main as app_main
+
+    def failing_get(url: str, timeout: int):
+        raise RuntimeError("worker down")
+
+    monkeypatch.setattr(app_main.requests, "get", failing_get)
+    resp = client.get("/acquire/worker/campaigns/alpha")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["name"] == "alpha"
+    assert payload["config"]["campaign"]["product"] == "TallyExpress"
