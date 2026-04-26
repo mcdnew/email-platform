@@ -61,9 +61,41 @@ services:
       UNSUBSCRIBE_SECRET: ${UNSUBSCRIBE_SECRET}
       OUTREACH_DB_PATH: /data/outreach.db
       CAMPAIGNS_DIR: /data/campaigns
+      FLASK_DEBUG: "0"
+      FLASK_HOST: "0.0.0.0"
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-local-dev-secret}
+      PORT: "5000"
     volumes:
       - ./worker-data:/data
       - worker_state:/root/.config/hailing
+    command: ["python", "app.py"]
+
+  worker-runner:
+    build:
+      context: ../outreach-bot
+      dockerfile: Dockerfile
+    restart: always
+    profiles:
+      - runner
+    depends_on:
+      - backend
+      - worker
+    env_file:
+      - ./worker.env
+    environment:
+      CORE_PLATFORM_URL: "http://backend:8000"
+      CORE_PLATFORM_PUBLIC_URL: ${CORE_PLATFORM_PUBLIC_URL:-}
+      CORE_PLATFORM_API_KEY: ${API_KEY}
+      UNSUBSCRIBE_SECRET: ${UNSUBSCRIBE_SECRET}
+      OUTREACH_DB_PATH: /data/outreach.db
+      CAMPAIGNS_DIR: /data/campaigns
+      FLASK_DEBUG: "0"
+      FLASK_HOST: "0.0.0.0"
+      PORT: "5000"
+    volumes:
+      - ./worker-data:/data
+      - worker_state:/root/.config/hailing
+    command: ["python", "main.py", "run"]
 
   frontend:
     build:

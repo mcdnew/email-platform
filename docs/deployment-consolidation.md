@@ -21,6 +21,7 @@ It currently runs:
 - `backend`
 - `frontend`
 - `worker`
+- optional `worker-runner`
 
 The `worker` service is built from:
 
@@ -54,6 +55,18 @@ Production-style path with reverse proxy:
 docker compose --profile proxy up --build
 ```
 
+If you want the background acquisition loop active too:
+
+```bash
+docker compose --profile runner up --build
+```
+
+If you want both proxy and runner:
+
+```bash
+docker compose --profile proxy --profile runner up --build
+```
+
 ## Required Local/Server Layout
 
 For the current compose file to work:
@@ -71,6 +84,14 @@ now centralized into this repo:
 - `./worker-data/outreach.db`
 
 This preserves current worker behavior while the migration is still in progress.
+
+Important runtime split:
+
+- `worker`: Flask JSON/API surface on port 5000 for the core app to query/control
+- `worker-runner`: optional long-running acquisition loop (`python main.py run`)
+
+This split is necessary because the core app depends on worker JSON endpoints,
+while the runner loop is an execution concern rather than an operator/API concern.
 
 ## Required Environment
 

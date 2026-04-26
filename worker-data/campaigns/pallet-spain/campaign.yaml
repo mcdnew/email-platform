@@ -1,0 +1,54 @@
+campaign:
+  name: pallet-spain
+  product: TallyExpress — AI Lumber Tally App
+  value_prop: reduces lumber bundle tallying from 15 minutes to 45 seconds with 99%
+    accuracy on any Android phone
+  tone: professional
+  sender_name: Claudiu Muntianu
+  personalization_level: 2
+  throttle_per_hour: 30
+knowledge:
+  about: "TallyExpress is an AI-powered lumber end-tally system that runs on standard\
+    \ Android smartphones.\r\nWorkers place a reference square on a lumber bundle,\
+    \ take a photo, and the app instantly\r\nmeasures every board and calculates total\
+    \ volume — in about 90 seconds.\r\nThe AI uses object recognition and machine\
+    \ learning. It improves with every tally taken.\r\nNo fixed equipment. No specialized\
+    \ training. No moving bundles to a measurement station.\r\nCloud-native: tallies\
+    \ sync instantly, supervisors can review remotely, data exports to inventory systems."
+  target_persona: operations manager, mill manager, or production director at a sawmill
+    or lumber facility
+  pricing: 'Subscription-based. Contact for pricing. Inventory system API integration:
+    $2,000/year.'
+  proof_points:
+  - Reduces a 15-minute manual tally to 90 seconds — 10x faster
+  - 98–99.5% accuracy, improving with every use
+  - Works on any Android smartphone — no dedicated hardware investment
+  - 'Brownlee Lumber: ''big morale boost — no employee prefers manual tallying over
+    this'''
+  objections: "\"We do manual tallying and it works fine\" — Manual tallying takes\
+    \ 15 minutes per bundle and introduces human error. TallyExpress does the same\
+    \ in 90 seconds at 98%+ accuracy.\r\n\"Our guys won't adopt a new tool\" — Every\
+    \ customer reports the opposite. Workers actively prefer it.\r\n\"Too expensive\"\
+    \ — ROI is straightforward: 10+ tallies/day, cost recovered in weeks from labor\
+    \ savings."
+discover:
+  prompt: sawmills and lumber production facilities in the United States and Canada
+    — operations managers or mill managers
+  count: 10
+  schedule: weekly
+  approval: required
+sequence:
+- day: 0
+  type: initial
+- day: 4
+  type: followup
+- day: 9
+  type: followup
+- day: 16
+  type: breakup
+replies:
+  INTERESTED: pause
+  QUESTION: auto_reply
+  NOT_NOW: auto_reply
+  UNSUBSCRIBE: stop
+  OTHER: auto_reply

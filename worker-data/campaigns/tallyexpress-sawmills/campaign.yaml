@@ -1,0 +1,58 @@
+campaign:
+  name: "tallyexpress-sawmills"
+  product: "TallyExpress — AI Lumber Tally App"
+  value_prop: "reduces lumber bundle tallying from 15 minutes to 90 seconds with 99% accuracy on any Android phone"
+  tone: "professional"
+  sender_name: "Claudiu Muntianu"
+  language: "en"
+  personalization_level: 2
+  throttle_per_hour: 30
+
+knowledge:
+  about: |
+    TallyExpress is an AI-powered lumber end-tally system that runs on standard Android smartphones.
+    Workers place a reference square on a lumber bundle, take a photo, and the app instantly
+    measures every board and calculates total volume — in about 90 seconds.
+    The AI uses object recognition and machine learning. It improves with every tally taken.
+    No fixed equipment. No specialized training. No moving bundles to a measurement station.
+    Cloud-native: tallies sync instantly, supervisors can review remotely, data exports to inventory systems.
+    Available on Google Play. API integration with inventory/ERP systems: $2,000/year add-on.
+  target_persona: "operations manager, mill manager, or production director at a hardwood sawmill or lumber production facility"
+  pricing: "Subscription-based. Contact for pricing. Inventory system API integration: $2,000/year. Uses standard Android phones already in the yard."
+  proof_points:
+    - "Reduces a 15-minute manual tally to 90 seconds — 10x faster"
+    - "98–99.5% accuracy, improving with every use (some sites reach 99.9%)"
+    - "Works on any Android smartphone — no dedicated hardware investment"
+    - "Brownlee Lumber: 'big morale boost in the yard — no employee prefers manual tallying over this'"
+    - "Consistent results regardless of operator experience level"
+    - "AI learns continuously — accuracy improves the more you use it"
+  objections: |
+    "We already have a tally system" — Most existing systems are slow, bulky, or require moving bundles. TallyExpress is mobile and 10x faster with comparable or better accuracy.
+    "We do manual tallying and it works fine" — Manual tallying takes 15 minutes per bundle and introduces human error. TallyExpress does the same in 90 seconds at 98%+ accuracy.
+    "Our guys won't adopt a new tool" — Every customer reports the opposite: workers actively prefer it over manual tallying. Brownlee Lumber said they haven't found a single employee who wouldn't rather use the app.
+    "We'd need to buy phones for everyone" — TallyExpress runs on any standard Android phone. Most yard workers already carry one.
+    "Too expensive" — The ROI is straightforward: if you do 10+ tallies a day, you recover the cost in labor savings within weeks.
+    "Accuracy concerns" — Starts at 98% and improves with use. Some sites reach 99.9%. Validated against tape measure tallies.
+
+discover:
+  prompt: "hardwood sawmills and lumber production facilities in the United States and Canada — operations managers or mill managers responsible for production efficiency"
+  count: 15
+  schedule: weekly
+  approval: required
+
+sequence:
+  - day: 0
+    type: initial
+  - day: 4
+    type: followup
+  - day: 9
+    type: followup
+  - day: 16
+    type: breakup
+
+replies:
+  INTERESTED: pause
+  QUESTION: auto_reply
+  NOT_NOW: auto_reply
+  UNSUBSCRIBE: stop
+  OTHER: auto_reply

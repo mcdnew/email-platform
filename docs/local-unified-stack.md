@@ -19,6 +19,29 @@ Other commands:
 ./scripts/unified-local-stack.sh restart
 ```
 
+## Single Launch Entry Point
+
+If you want one command that prefers Docker but automatically falls back to the
+verified local stack, use:
+
+```bash
+./scripts/start-platform.sh
+```
+
+Modes:
+
+```bash
+./scripts/start-platform.sh auto
+./scripts/start-platform.sh docker
+./scripts/start-platform.sh local
+```
+
+Docker/network diagnostics:
+
+```bash
+./scripts/check-docker-prereqs.sh
+```
+
 ## What It Starts
 
 - worker: `/home/claudiu/projects/outreach-bot/app.py` on `127.0.0.1:5000`

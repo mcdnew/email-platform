@@ -1,0 +1,64 @@
+campaign:
+  name: tallyexpress-dealers
+  product: TallyExpress — AI Lumber Tally App
+  value_prop: eliminates bottlenecks at receiving and shipping docks — tally any bundle
+    in 90 seconds on a smartphone
+  tone: professional
+  sender_name: Claudiu Muntianu
+  language: en
+  personalization_level: 2
+  throttle_per_hour: 30
+knowledge:
+  about: "TallyExpress is an AI-powered lumber end-tally system for Android smartphones.\r\
+    \nPlace a reference square on a bundle, snap a photo — the app measures every\
+    \ board\r\nand calculates total volume in about 90 seconds. No fixed equipment,\
+    \ no dedicated\r\nhardware, no moving bundles.\r\nFor lumber dealers and distributors,\
+    \ this solves two critical pain points:\r\n1. Receiving dock bottlenecks — verify\
+    \ incoming shipments fast, catch discrepancies before the truck leaves.\r\n2.\
+    \ Outbound accuracy — ship the right volume, reduce claims and disputes with customers.\r\
+    \nCloud-native: tally data syncs instantly, integrates with inventory/ERP systems\
+    \ via API ($2,000/year add-on).\r\nAI improves with each use — accuracy starts\
+    \ at 98% and reaches 99%+ over time."
+  target_persona: yard manager, operations director, or owner at a hardwood lumber
+    dealer or wholesale distributor
+  pricing: 'Subscription-based. Contact for pricing. Inventory system API: $2,000/year.
+    Runs on standard Android phones — no hardware purchase required.'
+  proof_points:
+  - 90-second bundle tallies vs. 15-minute manual process
+  - 98–99.5% accuracy — some sites reach 99.9%
+  - Instantly catch short-shipments at receiving before the truck leaves
+  - Reduce outbound disputes — ship what you invoice
+  - No dedicated hardware — runs on Android phones already in the yard
+  - Workers prefer it — faster and more accurate than manual counting
+  objections: "\"Our receiving process already works\" — Speed matters when trucks\
+    \ are waiting. 90-second tallies vs. 15-minute ones free up your dock and your\
+    \ people.\r\n\"We verify manually at receiving\" — Manual tallying introduces\
+    \ errors. A missed short-shipment costs you margin. TallyExpress gives you documented,\
+    \ timestamped proof for every bundle.\r\n\"We'd need to retrain staff\" — No training\
+    \ needed. If someone can take a photo on a smartphone, they can use TallyExpress.\
+    \ Every customer reports fast adoption.\r\n\"We don't have Android phones in the\
+    \ yard\" — Standard Android phones are inexpensive. The ROI from one prevented\
+    \ dispute or short-shipment typically covers the hardware cost.\r\n\"Our ERP already\
+    \ handles inventory\" — TallyExpress integrates with existing inventory systems\
+    \ via API. It feeds data in, not replaces what you have."
+discover:
+  prompt: hardwood lumber dealers, wholesale distributors, and lumber yards in France
+    — operations directors or yard managers who handle receiving and shipping
+  count: 15
+  schedule: weekly
+  approval: required
+sequence:
+- day: 0
+  type: initial
+- day: 4
+  type: followup
+- day: 9
+  type: followup
+- day: 16
+  type: breakup
+replies:
+  INTERESTED: pause
+  QUESTION: auto_reply
+  NOT_NOW: auto_reply
+  UNSUBSCRIBE: stop
+  OTHER: auto_reply
