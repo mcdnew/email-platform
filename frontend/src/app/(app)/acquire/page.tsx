@@ -199,6 +199,9 @@ export default function AcquirePage() {
                         <div className="text-xs text-gray-500 mt-1 truncate">
                           {[company, email].filter(Boolean).join(' • ') || 'No canonical email yet'}
                         </div>
+                        <div className="mt-2 text-[11px] uppercase tracking-wide text-gray-400">
+                          {capture.prospect_id ? 'promoted to prospect' : 'lead capture only'}
+                        </div>
                         {fact && <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">{fact}</p>}
                         {!email && (
                           <input
@@ -211,6 +214,14 @@ export default function AcquirePage() {
                         )}
                       </div>
                       <div className="flex gap-2">
+                        {capture.prospect_id ? (
+                          <Link
+                            href="/prospects"
+                            className="px-2.5 py-1.5 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700"
+                          >
+                            Open prospects
+                          </Link>
+                        ) : null}
                         <button
                           onClick={() => reviewMutation.mutate({
                             id: capture.id,
