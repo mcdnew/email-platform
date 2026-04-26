@@ -17,6 +17,7 @@ function parseJson(value: string | null): Record<string, unknown> {
 export default function AcquirePage() {
   const qc = useQueryClient()
   const [selectedSequences, setSelectedSequences] = useState<Record<number, string>>({})
+  const [captureEmails, setCaptureEmails] = useState<Record<number, string>>({})
   const { data: pendingCaptures, isLoading: capturesLoading } = useQuery({
     queryKey: ['lead-captures', 'pending_review'],
     queryFn: () => getLeadCaptures({ review_status: 'pending_review', source_type: 'web_discovery' }),
@@ -47,8 +48,8 @@ export default function AcquirePage() {
   })
 
   const reviewMutation = useMutation({
-    mutationFn: ({ id, review_status }: { id: number; review_status: 'approved' | 'rejected' }) =>
-      reviewLeadCapture(id, { review_status }),
+    mutationFn: ({ id, review_status, email, name, company }: { id: number; review_status: 'approved' | 'rejected'; email?: string; name?: string; company?: string }) =>
+      reviewLeadCapture(id, { review_status, email, name, company }),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['lead-captures'] }),
@@ -187,6 +188,7 @@ export default function AcquirePage() {
                 const email = normalized.email as string | undefined
                 const fact = normalized.fact as string | undefined
                 const name = normalized.name as string | undefined
+                const captureEmail = captureEmails[capture.id] ?? email ?? ''
                 return (
                   <div key={capture.id} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
                     <div className="flex items-start justify-between gap-3">
@@ -198,10 +200,25 @@ export default function AcquirePage() {
                           {[company, email].filter(Boolean).join(' • ') || 'No canonical email yet'}
                         </div>
                         {fact && <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">{fact}</p>}
+                        {!email && (
+                          <input
+                            type="email"
+                            value={captureEmail}
+                            onChange={(e) => setCaptureEmails((current) => ({ ...current, [capture.id]: e.target.value }))}
+                            placeholder="Add email to promote into prospect"
+                            className="mt-3 w-full rounded-md border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                          />
+                        )}
                       </div>
                       <div className="flex gap-2">
                         <button
-                          onClick={() => reviewMutation.mutate({ id: capture.id, review_status: 'approved' })}
+                          onClick={() => reviewMutation.mutate({
+                            id: capture.id,
+                            review_status: 'approved',
+                            email: captureEmail || undefined,
+                            name,
+                            company,
+                          })}
                           className="px-2.5 py-1.5 text-xs rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
                           disabled={reviewMutation.isPending}
                         >

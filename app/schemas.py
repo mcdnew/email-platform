@@ -172,6 +172,10 @@ class OutreachNurtureHandoffRequest(BaseModel):
 class LeadCaptureReviewRequest(BaseModel):
     review_status: str  # approved | rejected
     notes: Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[str] = None
+    company: Optional[str] = None
+    title: Optional[str] = None
 
 
 class LeadCaptureRead(BaseModel):

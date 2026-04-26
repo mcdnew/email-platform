@@ -417,6 +417,45 @@ def test_lead_capture_review_queue_and_approval(client, db):
     assert "Operator approved" in (prospect.notes or "")
 
 
+def test_lead_capture_review_can_promote_capture_without_email_to_prospect(client, db):
+    capture = LeadCapture(
+        source_type="web_discovery",
+        review_status="pending_review",
+        normalized_payload_json=json.dumps({
+            "name": "Julien Renaud",
+            "email": None,
+            "company": "Henry Timber",
+            "title": None,
+        }),
+        external_ref="tallyexpress-dealers:Henry Timber",
+    )
+    db.add(capture)
+    db.commit()
+    db.refresh(capture)
+
+    resp = client.post(
+        f"/lead-captures/{capture.id}/review",
+        json={
+            "review_status": "approved",
+            "email": "julien.renaud@example.com",
+            "title": "Commercial Director",
+            "notes": "Email verified manually",
+        },
+    )
+    assert resp.status_code == 200
+
+    db.refresh(capture)
+    assert capture.prospect_id is not None
+
+    prospect = db.get(Prospect, capture.prospect_id)
+    assert prospect is not None
+    assert prospect.email == "julien.renaud@example.com"
+    assert prospect.name == "Julien Renaud"
+    assert prospect.company == "Henry Timber"
+    assert prospect.title == "Commercial Director"
+    assert prospect.lifecycle_stage == "ready_for_outreach"
+
+
 def test_activity_events_and_conversations_list_endpoints(client, db):
     prospect = Prospect(name="Event User", email="event@example.com", lifecycle_stage="interested")
     db.add(prospect)

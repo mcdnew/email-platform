@@ -181,7 +181,14 @@ export const clearErrorLog = () => req<{ message: string }>('/clear-error-log', 
 export const getLeadCaptures = (params: { review_status?: string; source_type?: string }) =>
   req<LeadCapture[]>(`/lead-captures${buildQs(params)}`)
 
-export const reviewLeadCapture = (id: number, data: { review_status: 'approved' | 'rejected'; notes?: string }) =>
+export const reviewLeadCapture = (id: number, data: {
+  review_status: 'approved' | 'rejected'
+  notes?: string
+  name?: string
+  email?: string
+  company?: string
+  title?: string
+}) =>
   req<{ message: string; capture_id: number; review_status: string }>(`/lead-captures/${id}/review`, {
     method: 'POST',
     body: JSON.stringify(data),

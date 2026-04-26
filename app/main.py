@@ -1730,6 +1730,47 @@ def review_lead_capture(capture_id: int, payload: LeadCaptureReviewRequest, db: 
     db.add(capture)
 
     prospect = db.get(Prospect, capture.prospect_id) if capture.prospect_id else None
+    normalized = {}
+    if capture.normalized_payload_json:
+        try:
+            normalized = json.loads(capture.normalized_payload_json)
+        except (json.JSONDecodeError, TypeError):
+            normalized = {}
+
+    if not prospect and payload.review_status == "approved":
+        resolved_name = payload.name or normalized.get("name") or capture.external_ref or f"LeadCapture-{capture.id}"
+        resolved_email = (payload.email or normalized.get("email") or "").strip().lower()
+        resolved_company = payload.company or normalized.get("company")
+        resolved_title = payload.title or normalized.get("title")
+        if resolved_email:
+            prospect = db.exec(select(Prospect).where(Prospect.email == resolved_email)).first()
+            if prospect is None:
+                prospect = Prospect(
+                    name=resolved_name,
+                    email=resolved_email,
+                    company=resolved_company,
+                    title=resolved_title,
+                    lifecycle_stage="ready_for_outreach",
+                    source_type=capture.source_type,
+                    source_ref=capture.external_ref,
+                )
+                db.add(prospect)
+                db.flush()
+            else:
+                if resolved_name:
+                    prospect.name = resolved_name
+                if resolved_company:
+                    prospect.company = resolved_company
+                if resolved_title:
+                    prospect.title = resolved_title
+                prospect.lifecycle_stage = "ready_for_outreach"
+                prospect.source_type = capture.source_type
+                prospect.source_ref = capture.external_ref
+                db.add(prospect)
+                db.flush()
+            capture.prospect_id = prospect.id
+            db.add(capture)
+
     if prospect:
         if payload.notes:
             prospect.notes = f"{prospect.notes}\n---\n{payload.notes}" if prospect.notes else payload.notes
