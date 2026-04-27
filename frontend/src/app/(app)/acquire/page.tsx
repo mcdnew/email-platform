@@ -29,6 +29,10 @@ export default function AcquirePage() {
     queryKey: ['lead-captures', 'pending_review'],
     queryFn: () => getLeadCaptures({ review_status: 'pending_review', source_type: 'web_discovery' }),
   })
+  const { data: enrichmentCaptures, isLoading: enrichmentCapturesLoading } = useQuery({
+    queryKey: ['lead-captures', 'needs_enrichment'],
+    queryFn: () => getLeadCaptures({ review_status: 'needs_enrichment', source_type: 'web_discovery' }),
+  })
   const { data: linkedCaptures, isLoading: linkedCapturesLoading } = useQuery({
     queryKey: ['lead-captures', 'linked'],
     queryFn: () => getLeadCaptures({ review_status: 'linked', source_type: 'web_discovery' }),
@@ -358,6 +362,67 @@ export default function AcquirePage() {
                           Reject
                         </button>
                       </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+
+        <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">Needs Enrichment</h2>
+            <span className="text-xs text-gray-400">{enrichmentCaptures?.length ?? 0} items</span>
+          </div>
+          {enrichmentCapturesLoading ? (
+            <p className="text-sm text-gray-500">Loading…</p>
+          ) : !enrichmentCaptures?.length ? (
+            <p className="text-sm text-gray-500">No discovery candidates waiting for email enrichment.</p>
+          ) : (
+            <div className="space-y-3">
+              {enrichmentCaptures.slice(0, 8).map((capture) => {
+                const normalized = parseJson(capture.normalized_payload_json)
+                const company = normalized.company as string | undefined
+                const fact = normalized.fact as string | undefined
+                const name = normalized.name as string | undefined
+                const campaignKey = normalized.campaign_key as string | undefined
+                const captureEmail = captureEmails[capture.id] ?? ''
+                return (
+                  <div key={capture.id} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
+                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {name || company || capture.external_ref || `Lead #${capture.id}`}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">{campaignKey || 'web_discovery'}</div>
+                    {fact && <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">{fact}</p>}
+                    <input
+                      type="email"
+                      value={captureEmail}
+                      onChange={(e) => setCaptureEmails((current) => ({ ...current, [capture.id]: e.target.value }))}
+                      placeholder="Add verified email to promote into prospect"
+                      className="mt-3 w-full rounded-md border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                    />
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => reviewMutation.mutate({
+                          id: capture.id,
+                          review_status: 'approved',
+                          email: captureEmail || undefined,
+                          name,
+                          company,
+                        })}
+                        className="px-2.5 py-1.5 text-xs rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                        disabled={reviewMutation.isPending || !captureEmail}
+                      >
+                        Promote with email
+                      </button>
+                      <button
+                        onClick={() => reviewMutation.mutate({ id: capture.id, review_status: 'rejected' })}
+                        className="px-2.5 py-1.5 text-xs rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+                        disabled={reviewMutation.isPending}
+                      >
+                        Reject
+                      </button>
                     </div>
                   </div>
                 )

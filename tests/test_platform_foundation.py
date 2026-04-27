@@ -257,6 +257,7 @@ def test_outreach_discovery_ingest_creates_prospects_and_lead_captures(client, d
     event = db.exec(select(ActivityEvent).where(ActivityEvent.prospect_id == prospect.id)).first()
     assert event is not None
     assert event.event_type == "acquire.discovery_ingested"
+    assert captures[1].review_status == "needs_enrichment"
 
 
 def test_outreach_discovery_check_detects_existing_email_and_company(client, db):
@@ -326,6 +327,109 @@ def test_outreach_discovery_ingest_links_known_company_without_new_pending_revie
         select(ActivityEvent).where(ActivityEvent.event_type == "acquire.discovery_duplicate_skipped")
     ).one()
     assert duplicate_event.prospect_id == prospect.id
+
+
+def test_outreach_discovery_check_detects_existing_lead_capture_without_prospect(client, db):
+    capture = LeadCapture(
+        source_type="web_discovery",
+        review_status="pending_review",
+        normalized_payload_json=json.dumps({
+            "name": "Laurent Parisse",
+            "email": None,
+            "company": "Henry Timber",
+            "website": "https://henrytimber.example",
+            "campaign_key": "tallyexpress-dealers",
+        }),
+        external_ref="tallyexpress-dealers:Henry Timber",
+    )
+    db.add(capture)
+    db.commit()
+
+    resp = client.post(
+        "/integrations/outreach/discovery-check",
+        json={
+            "campaign_key": "tallyexpress-dealers",
+            "company": "Henry Timber",
+            "website": "https://henrytimber.example",
+        },
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["classification"] == "duplicate_acquisition_company"
+
+
+def test_outreach_discovery_ingest_links_existing_lead_capture_without_new_pending_review(client, db):
+    capture = LeadCapture(
+        source_type="web_discovery",
+        review_status="pending_review",
+        normalized_payload_json=json.dumps({
+            "name": "Laurent Parisse",
+            "email": None,
+            "company": "Henry Timber",
+            "website": "https://henrytimber.example",
+            "campaign_key": "tallyexpress-dealers",
+        }),
+        external_ref="tallyexpress-dealers:Henry Timber",
+    )
+    db.add(capture)
+    db.commit()
+
+    resp = client.post(
+        "/integrations/outreach/discoveries",
+        json={
+            "campaign_key": "tallyexpress-dealers",
+            "approval_required": True,
+            "leads": [
+                {
+                    "name": "Laurent Parisse",
+                    "company": "Henry Timber",
+                    "website": "https://henrytimber.example",
+                    "external_ref": "henry-timber-rediscovery",
+                }
+            ],
+        },
+    )
+
+    assert resp.status_code == 200
+    queue_items = db.exec(select(LeadCapture).where(LeadCapture.review_status == "pending_review")).all()
+    assert len(queue_items) == 1
+    linked = db.exec(select(LeadCapture).where(LeadCapture.external_ref == "henry-timber-rediscovery")).one()
+    assert linked.review_status == "linked"
+
+
+def test_lead_capture_review_promotes_needs_enrichment_when_email_added(client, db):
+    capture = LeadCapture(
+        source_type="web_discovery",
+        review_status="needs_enrichment",
+        normalized_payload_json=json.dumps({
+            "name": "No Email Lead",
+            "email": None,
+            "company": "Queue Co",
+            "campaign_key": "acquire:lumber",
+        }),
+        external_ref="queue-co-no-email",
+    )
+    db.add(capture)
+    db.commit()
+    db.refresh(capture)
+
+    resp = client.post(
+        f"/lead-captures/{capture.id}/review",
+        json={
+            "review_status": "approved",
+            "email": "new@queueco.example",
+            "company": "Queue Co",
+            "name": "No Email Lead",
+        },
+    )
+
+    assert resp.status_code == 200
+    db.refresh(capture)
+    assert capture.prospect_id is not None
+    prospect = db.get(Prospect, capture.prospect_id)
+    assert prospect is not None
+    assert prospect.email == "new@queueco.example"
 
 
 def test_outreach_message_and_reply_ingest_update_conversation_and_suppression(client, db):

@@ -261,7 +261,7 @@ def _classify_discovery_candidate(
     email: str | None,
     company: str | None,
     website: str | None,
-) -> tuple[str, Prospect | None, str]:
+) -> tuple[str, Prospect | None, str, bool]:
     normalized_email = (email or "").strip().lower() or None
     normalized_company = _normalize_company_name(company)
     normalized_domain = _extract_domain(website) or _extract_domain(normalized_email)
@@ -270,8 +270,8 @@ def _classify_discovery_candidate(
         email_match = db.exec(select(Prospect).where(Prospect.email == normalized_email)).first()
         if email_match:
             if _prospect_is_acquisition_discovery(email_match):
-                return "duplicate_acquisition_contact", email_match, "email already exists in acquisition discovery"
-            return "known_non_acquisition_contact", email_match, "email already exists in the platform"
+                return "duplicate_acquisition_contact", email_match, "email already exists in acquisition discovery", False
+            return "known_non_acquisition_contact", email_match, "email already exists in the platform", False
 
     prospects = db.exec(select(Prospect)).all()
     company_match = None
@@ -289,13 +289,34 @@ def _classify_discovery_candidate(
     if match:
         if _prospect_is_acquisition_discovery(match):
             if company_match:
-                return "duplicate_acquisition_company", match, "company already exists in acquisition discovery"
-            return "duplicate_acquisition_company", match, "domain already exists in acquisition discovery"
+                return "duplicate_acquisition_company", match, "company already exists in acquisition discovery", False
+            return "duplicate_acquisition_company", match, "domain already exists in acquisition discovery", False
         if company_match:
-            return "known_non_acquisition_company", match, "company already exists in the platform"
-        return "known_non_acquisition_company", match, "domain already exists in the platform"
+            return "known_non_acquisition_company", match, "company already exists in the platform", False
+        return "known_non_acquisition_company", match, "domain already exists in the platform", False
 
-    return "new", None, "candidate is new for acquisition discovery"
+    lead_captures = db.exec(select(LeadCapture).where(LeadCapture.source_type == "web_discovery")).all()
+    for capture in lead_captures:
+        normalized_payload = {}
+        if capture.normalized_payload_json:
+            try:
+                normalized_payload = json.loads(capture.normalized_payload_json)
+            except (json.JSONDecodeError, TypeError):
+                normalized_payload = {}
+        capture_email = (normalized_payload.get("email") or "").strip().lower() or None
+        capture_company = _normalize_company_name(normalized_payload.get("company"))
+        capture_domain = _extract_domain(normalized_payload.get("website")) or _extract_domain(capture_email)
+        if normalized_email and capture_email == normalized_email:
+            linked_prospect = db.get(Prospect, capture.prospect_id) if capture.prospect_id else None
+            return "duplicate_acquisition_contact", linked_prospect, "email already exists in discovery lead captures", True
+        if normalized_company and capture_company == normalized_company:
+            linked_prospect = db.get(Prospect, capture.prospect_id) if capture.prospect_id else None
+            return "duplicate_acquisition_company", linked_prospect, "company already exists in discovery lead captures", True
+        if normalized_domain and capture_domain == normalized_domain:
+            linked_prospect = db.get(Prospect, capture.prospect_id) if capture.prospect_id else None
+            return "duplicate_acquisition_company", linked_prospect, "domain already exists in discovery lead captures", True
+
+    return "new", None, "candidate is new for acquisition discovery", False
 
 
 def _upsert_worker_campaign_snapshot(db: Session, payload: dict) -> WorkerCampaignSnapshot:
@@ -1568,7 +1589,7 @@ def send_email_to_prospect(data: SendEmailRequest, db: Session = Depends(get_ses
     dependencies=[Depends(require_api_key)],
 )
 def check_outreach_discovery_candidate(payload: OutreachDiscoveryCandidateCheckRequest, db: Session = Depends(get_session)):
-    classification, match, reason = _classify_discovery_candidate(
+    classification, match, reason, _ = _classify_discovery_candidate(
         db,
         email=payload.email,
         company=payload.company,
@@ -1596,13 +1617,15 @@ def ingest_outreach_discoveries(payload: OutreachDiscoveryIngestRequest, db: Ses
     for lead in payload.leads:
         lead_data = _model_dump(lead)
         external_ref = lead.external_ref or f"{payload.campaign_key}:{lead.email or lead.company or uuid.uuid4().hex}"
-        review_status = "pending_review" if payload.approval_required else "approved"
-        lifecycle_stage = "pending_review" if payload.approval_required else "ready_for_outreach"
+        email = (lead.email or "").strip().lower() or None
+        lead_status = lead_data.get("_discovery_status")
+        requires_enrichment = lead_status == "needs_enrichment" or not email
+        review_status = "needs_enrichment" if requires_enrichment else ("pending_review" if payload.approval_required else "approved")
+        lifecycle_stage = "pending_review" if payload.approval_required or requires_enrichment else "ready_for_outreach"
 
         prospect = None
         action = "lead_capture_only"
-        email = (lead.email or "").strip().lower() or None
-        classification, existing_match, _ = _classify_discovery_candidate(
+        classification, existing_match, _, matched_existing_capture = _classify_discovery_candidate(
             db,
             email=email,
             company=lead.company,
@@ -1634,6 +1657,8 @@ def ingest_outreach_discoveries(payload: OutreachDiscoveryIngestRequest, db: Ses
                 source_module="acquire",
                 payload={"classification": classification, "external_ref": external_ref},
             )
+        elif classification != "new" and matched_existing_capture:
+            action = classification
         elif email:
             prospect = db.exec(select(Prospect).where(Prospect.email == email)).first()
             if prospect:
@@ -1679,7 +1704,7 @@ def ingest_outreach_discoveries(payload: OutreachDiscoveryIngestRequest, db: Ses
             db,
             prospect_id=prospect.id if prospect else None,
             source_type="web_discovery",
-            review_status="linked" if classification != "new" and prospect else review_status,
+            review_status="linked" if classification != "new" else review_status,
             raw_payload=lead_data,
             normalized_payload={
                 "name": lead.name,
