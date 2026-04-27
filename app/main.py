@@ -4,11 +4,13 @@ import io
 import json
 import os
 import logging
+import re
 import requests
 import shutil
 import uuid
 from datetime import datetime, date, time
 from typing import List, Optional
+from urllib.parse import urlparse
 
 import pytz
 from fastapi import FastAPI, HTTPException, Depends, Request, Security, status, UploadFile, File
@@ -30,6 +32,7 @@ from app.schemas import (
     AssignSequenceRequest, SequenceCreate, SequenceRead, TestEmailRequest,
     ProspectImport, StepReorderRequest, BusinessCardUpsert, BusinessCardUpsertResponse,
     OutreachDiscoveryIngestRequest, OutreachDiscoveryIngestResponse, OutreachDiscoveryResultItem,
+    OutreachDiscoveryCandidateCheckRequest, OutreachDiscoveryCandidateCheckResponse,
     OutreachMessageSentRequest, OutreachReplyIngestRequest, OutreachNurtureHandoffRequest,
     LeadCaptureReviewRequest, LeadCaptureRead, ActivityEventRead, ConversationRead,
     ProspectLifecycleActionRequest,
@@ -212,6 +215,87 @@ def _record_asset(
 
 def _worker_base_url() -> str:
     return os.getenv("WORKER_BASE_URL", "http://worker:5000").rstrip("/")
+
+
+_ACQUISITION_DISCOVERY_SOURCE_TYPES = {"web_discovery"}
+
+
+def _normalize_company_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+    if not cleaned:
+        return None
+    suffixes = {
+        "inc", "llc", "ltd", "limited", "corp", "corporation", "company", "co", "sa", "sl",
+        "sarl", "gmbh", "bv", "sas", "spa", "plc",
+    }
+    parts = [part for part in cleaned.split() if part not in suffixes]
+    normalized = " ".join(parts).strip()
+    return normalized or cleaned
+
+
+def _extract_domain(value: str | None) -> str | None:
+    if not value:
+        return None
+    candidate = value.strip().lower()
+    if not candidate:
+        return None
+    if "@" in candidate:
+        candidate = candidate.split("@", 1)[1]
+    else:
+        parsed = urlparse(candidate if "://" in candidate else f"https://{candidate}")
+        candidate = parsed.netloc or parsed.path
+    candidate = candidate.split("/", 1)[0].split(":", 1)[0]
+    candidate = candidate.removeprefix("www.")
+    return candidate or None
+
+
+def _prospect_is_acquisition_discovery(prospect: Prospect) -> bool:
+    return prospect.source_type in _ACQUISITION_DISCOVERY_SOURCE_TYPES
+
+
+def _classify_discovery_candidate(
+    db: Session,
+    *,
+    email: str | None,
+    company: str | None,
+    website: str | None,
+) -> tuple[str, Prospect | None, str]:
+    normalized_email = (email or "").strip().lower() or None
+    normalized_company = _normalize_company_name(company)
+    normalized_domain = _extract_domain(website) or _extract_domain(normalized_email)
+
+    if normalized_email:
+        email_match = db.exec(select(Prospect).where(Prospect.email == normalized_email)).first()
+        if email_match:
+            if _prospect_is_acquisition_discovery(email_match):
+                return "duplicate_acquisition_contact", email_match, "email already exists in acquisition discovery"
+            return "known_non_acquisition_contact", email_match, "email already exists in the platform"
+
+    prospects = db.exec(select(Prospect)).all()
+    company_match = None
+    domain_match = None
+    for prospect in prospects:
+        if not company_match and normalized_company and _normalize_company_name(prospect.company) == normalized_company:
+            company_match = prospect
+        prospect_domain = _extract_domain(prospect.website) or _extract_domain(prospect.email)
+        if not domain_match and normalized_domain and prospect_domain == normalized_domain:
+            domain_match = prospect
+        if company_match and domain_match:
+            break
+
+    match = company_match or domain_match
+    if match:
+        if _prospect_is_acquisition_discovery(match):
+            if company_match:
+                return "duplicate_acquisition_company", match, "company already exists in acquisition discovery"
+            return "duplicate_acquisition_company", match, "domain already exists in acquisition discovery"
+        if company_match:
+            return "known_non_acquisition_company", match, "company already exists in the platform"
+        return "known_non_acquisition_company", match, "domain already exists in the platform"
+
+    return "new", None, "candidate is new for acquisition discovery"
 
 
 def _upsert_worker_campaign_snapshot(db: Session, payload: dict) -> WorkerCampaignSnapshot:
@@ -1479,6 +1563,26 @@ def send_email_to_prospect(data: SendEmailRequest, db: Session = Depends(get_ses
 
 
 @app.post(
+    "/integrations/outreach/discovery-check",
+    response_model=OutreachDiscoveryCandidateCheckResponse,
+    dependencies=[Depends(require_api_key)],
+)
+def check_outreach_discovery_candidate(payload: OutreachDiscoveryCandidateCheckRequest, db: Session = Depends(get_session)):
+    classification, match, reason = _classify_discovery_candidate(
+        db,
+        email=payload.email,
+        company=payload.company,
+        website=payload.website,
+    )
+    return OutreachDiscoveryCandidateCheckResponse(
+        classification=classification,
+        matched_prospect_id=match.id if match else None,
+        matched_company=match.company if match else payload.company,
+        reason=reason,
+    )
+
+
+@app.post(
     "/integrations/outreach/discoveries",
     response_model=OutreachDiscoveryIngestResponse,
     dependencies=[Depends(require_api_key)],
@@ -1498,8 +1602,39 @@ def ingest_outreach_discoveries(payload: OutreachDiscoveryIngestRequest, db: Ses
         prospect = None
         action = "lead_capture_only"
         email = (lead.email or "").strip().lower() or None
+        classification, existing_match, _ = _classify_discovery_candidate(
+            db,
+            email=email,
+            company=lead.company,
+            website=lead.website,
+        )
 
-        if email:
+        if classification != "new" and existing_match:
+            prospect = existing_match
+            action = classification
+            if lead.name:
+                prospect.name = lead.name
+            if lead.company and not prospect.company:
+                prospect.company = lead.company
+            if lead.title and not prospect.title:
+                prospect.title = lead.title
+            if lead.website and not prospect.website:
+                prospect.website = lead.website
+            if lead.linkedin and not prospect.linkedin:
+                prospect.linkedin = lead.linkedin
+            if lead.fact:
+                prospect.notes = f"{prospect.notes}\n---\nFACT: {lead.fact}" if prospect.notes else f"FACT: {lead.fact}"
+            db.add(prospect)
+            db.flush()
+            _record_activity_event(
+                db,
+                prospect_id=prospect.id,
+                campaign_key=payload.campaign_key,
+                event_type="acquire.discovery_duplicate_skipped",
+                source_module="acquire",
+                payload={"classification": classification, "external_ref": external_ref},
+            )
+        elif email:
             prospect = db.exec(select(Prospect).where(Prospect.email == email)).first()
             if prospect:
                 action = "updated"
@@ -1544,7 +1679,7 @@ def ingest_outreach_discoveries(payload: OutreachDiscoveryIngestRequest, db: Ses
             db,
             prospect_id=prospect.id if prospect else None,
             source_type="web_discovery",
-            review_status=review_status,
+            review_status="linked" if classification != "new" and prospect else review_status,
             raw_payload=lead_data,
             normalized_payload={
                 "name": lead.name,
@@ -1555,6 +1690,7 @@ def ingest_outreach_discoveries(payload: OutreachDiscoveryIngestRequest, db: Ses
                 "linkedin": lead.linkedin,
                 "fact": lead.fact,
                 "campaign_key": payload.campaign_key,
+                "classification": classification,
             },
             external_ref=external_ref,
         )

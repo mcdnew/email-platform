@@ -29,6 +29,10 @@ export default function AcquirePage() {
     queryKey: ['lead-captures', 'pending_review'],
     queryFn: () => getLeadCaptures({ review_status: 'pending_review', source_type: 'web_discovery' }),
   })
+  const { data: linkedCaptures, isLoading: linkedCapturesLoading } = useQuery({
+    queryKey: ['lead-captures', 'linked'],
+    queryFn: () => getLeadCaptures({ review_status: 'linked', source_type: 'web_discovery' }),
+  })
   const { data: interestedProspects, isLoading: interestedLoading } = useQuery({
     queryKey: ['prospects', 'interested'],
     queryFn: () => getProspects({ lifecycle_stage: 'interested', per_page: 25, page: 1 }),
@@ -363,6 +367,45 @@ export default function AcquirePage() {
         </section>
 
         <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">Known Existing Matches</h2>
+            <span className="text-xs text-gray-400">{linkedCaptures?.length ?? 0} linked</span>
+          </div>
+          {linkedCapturesLoading ? (
+            <p className="text-sm text-gray-500">Loading…</p>
+          ) : !linkedCaptures?.length ? (
+            <p className="text-sm text-gray-500">No linked duplicate discoveries.</p>
+          ) : (
+            <div className="space-y-3">
+              {linkedCaptures.slice(0, 8).map((capture) => {
+                const normalized = parseJson(capture.normalized_payload_json)
+                const company = normalized.company as string | undefined
+                const classification = normalized.classification as string | undefined
+                const campaignKey = normalized.campaign_key as string | undefined
+                return (
+                  <div key={capture.id} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
+                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {company || capture.external_ref || `Capture #${capture.id}`}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      {[campaignKey, classification].filter(Boolean).join(' • ')}
+                    </div>
+                    {capture.prospect_id ? (
+                      <Link
+                        href={`/acquire/${capture.prospect_id}`}
+                        className="mt-2 inline-flex px-2.5 py-1.5 text-xs rounded-md bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 dark:bg-gray-950 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-900"
+                      >
+                        Open existing prospect
+                      </Link>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+
+        <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">Interested Contacts</h2>
             <span className="text-xs text-gray-400">{interestedProspects?.total ?? 0} contacts</span>

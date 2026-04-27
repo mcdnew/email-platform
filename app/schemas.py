@@ -146,6 +146,20 @@ class OutreachDiscoveryIngestResponse(BaseModel):
     items: List[OutreachDiscoveryResultItem]
 
 
+class OutreachDiscoveryCandidateCheckRequest(BaseModel):
+    campaign_key: str
+    email: Optional[str] = None
+    company: Optional[str] = None
+    website: Optional[str] = None
+
+
+class OutreachDiscoveryCandidateCheckResponse(BaseModel):
+    classification: str
+    matched_prospect_id: Optional[int] = None
+    matched_company: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class OutreachMessageSentRequest(BaseModel):
     prospect_id: Optional[int] = None
     email: Optional[str] = None

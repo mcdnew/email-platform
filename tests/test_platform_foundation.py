@@ -259,6 +259,75 @@ def test_outreach_discovery_ingest_creates_prospects_and_lead_captures(client, d
     assert event.event_type == "acquire.discovery_ingested"
 
 
+def test_outreach_discovery_check_detects_existing_email_and_company(client, db):
+    prospect = Prospect(
+        name="Existing User",
+        email="existing@example.com",
+        company="North Mill Ltd.",
+        source_type="web_discovery",
+    )
+    db.add(prospect)
+    db.commit()
+    db.refresh(prospect)
+
+    email_resp = client.post(
+        "/integrations/outreach/discovery-check",
+        json={"campaign_key": "acquire:lumber", "email": "existing@example.com", "company": "Other Co"},
+    )
+    assert email_resp.status_code == 200
+    assert email_resp.json()["classification"] == "duplicate_acquisition_contact"
+
+    company_resp = client.post(
+        "/integrations/outreach/discovery-check",
+        json={"campaign_key": "acquire:lumber", "company": "North Mill Limited", "website": "https://northmill.test"},
+    )
+    assert company_resp.status_code == 200
+    assert company_resp.json()["classification"] == "duplicate_acquisition_company"
+
+
+def test_outreach_discovery_ingest_links_known_company_without_new_pending_review(client, db):
+    prospect = Prospect(
+        name="Known Company Owner",
+        email="owner@northmill.test",
+        company="North Mill Ltd.",
+        source_type="web_discovery",
+        lifecycle_stage="ready_for_outreach",
+    )
+    db.add(prospect)
+    db.commit()
+    db.refresh(prospect)
+
+    resp = client.post(
+        "/integrations/outreach/discoveries",
+        json={
+            "campaign_key": "acquire:lumber",
+            "approval_required": True,
+            "leads": [
+                {
+                    "name": "Fresh Contact",
+                    "email": None,
+                    "company": "North Mill Limited",
+                    "title": "Operations Director",
+                    "website": "https://northmill.test",
+                    "external_ref": "disc-known-company",
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["created_or_updated"] == 0
+
+    capture = db.exec(select(LeadCapture).where(LeadCapture.external_ref == "disc-known-company")).one()
+    assert capture.review_status == "linked"
+    assert capture.prospect_id == prospect.id
+
+    duplicate_event = db.exec(
+        select(ActivityEvent).where(ActivityEvent.event_type == "acquire.discovery_duplicate_skipped")
+    ).one()
+    assert duplicate_event.prospect_id == prospect.id
+
+
 def test_outreach_message_and_reply_ingest_update_conversation_and_suppression(client, db):
     prospect = Prospect(
         name="Reply User",
