@@ -72,6 +72,17 @@ class ProspectImport(BaseModel):
     company: Optional[str] = None
     title: Optional[str] = None
 
+
+class ProspectUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    company: Optional[str] = None
+    title: Optional[str] = None
+    sequence_id: Optional[int] = None
+    unsubscribed: Optional[bool] = None
+    phone: Optional[str] = None
+    notes: Optional[str] = None
+
 # --- Business card upsert (from mobile app) ---
 class BusinessCardUpsert(BaseModel):
     name: str
@@ -178,6 +189,13 @@ class LeadCaptureReviewRequest(BaseModel):
     title: Optional[str] = None
 
 
+class LeadCaptureReviewResponse(BaseModel):
+    message: str
+    capture_id: int
+    review_status: str
+    prospect_id: Optional[int] = None
+
+
 class LeadCaptureRead(BaseModel):
     id: int
     prospect_id: Optional[int] = None
@@ -244,6 +262,11 @@ class WorkerCampaignRunRequest(BaseModel):
     dry_run: bool = False
 
 
+class WorkerCampaignDiscoverRequest(BaseModel):
+    dry_run: bool = False
+    count: Optional[int] = None
+
+
 class WorkerCampaignDetailRead(BaseModel):
     name: str
     config: dict
@@ -255,6 +278,29 @@ class WorkerCampaignDetailRead(BaseModel):
 
 class WorkerCampaignUpdateRequest(BaseModel):
     config: dict
+
+
+class WorkerCampaignActivityEntryRead(BaseModel):
+    id: int
+    ts: str
+    campaign: Optional[str] = None
+    level: str
+    message: str
+
+
+class WorkerCampaignActivityFeedRead(BaseModel):
+    entries: List[WorkerCampaignActivityEntryRead]
+    max_id: int
+
+
+class WorkerCampaignTraceEntryRead(BaseModel):
+    id: int
+    ts: str
+    campaign: str
+    run_id: Optional[str] = None
+    kind: str
+    event: str
+    payload: Optional[str] = None
 
 
 class WorkerCampaignSnapshotRead(BaseModel):

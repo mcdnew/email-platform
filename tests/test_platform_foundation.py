@@ -15,6 +15,8 @@ from app.models import (
     Sequence,
     SequenceStep,
     ScheduledEmail,
+    SentEmail,
+    EmailTemplate,
     Enrollment,
     Suppression,
     ActivityEvent,
@@ -421,6 +423,7 @@ def test_lead_capture_review_queue_and_approval(client, db):
         json={"review_status": "approved", "notes": "Operator approved"},
     )
     assert review_resp.status_code == 200
+    assert review_resp.json()["prospect_id"] is not None
 
     capture = db.get(LeadCapture, capture_id)
     assert capture.review_status == "approved"
@@ -458,6 +461,7 @@ def test_lead_capture_review_can_promote_capture_without_email_to_prospect(clien
         },
     )
     assert resp.status_code == 200
+    assert resp.json()["prospect_id"] is not None
 
     db.refresh(capture)
     assert capture.prospect_id is not None
@@ -506,6 +510,82 @@ def test_activity_events_and_conversations_list_endpoints(client, db):
     conversations = conv_resp.json()
     assert len(conversations) == 1
     assert conversations[0]["provider_thread_id"] == "thread-abc"
+
+
+def test_partial_prospect_update_supports_unsubscribe_toggle(client, db):
+    prospect = Prospect(name="Toggle User", email="toggle@example.com", unsubscribed=False)
+    db.add(prospect)
+    db.commit()
+    db.refresh(prospect)
+
+    resp = client.put(f"/prospects/{prospect.id}", json={"unsubscribed": True})
+
+    assert resp.status_code == 200
+    db.refresh(prospect)
+    assert prospect.unsubscribed is True
+
+
+def test_delete_prospect_handles_gathered_lead_relations(client, db):
+    prospect = Prospect(
+        name="Delete Me",
+        email="delete@example.com",
+        lifecycle_stage="interested",
+        notes="Important history",
+        source_type="web_discovery",
+    )
+    sequence = Sequence(name="Cleanup Sequence")
+    template = EmailTemplate(name="Cleanup Template", subject="Hi", body="Body")
+    db.add(prospect)
+    db.add(sequence)
+    db.add(template)
+    db.commit()
+    db.refresh(prospect)
+    db.refresh(sequence)
+    db.refresh(template)
+
+    db.add(ScheduledEmail(
+        prospect_id=prospect.id,
+        template_id=template.id,
+        sequence_id=sequence.id,
+        send_at=prospect.created_at,
+        status="pending",
+    ))
+    db.add(SentEmail(
+        to=prospect.email,
+        subject="Subject",
+        body="Body",
+        sent_at=prospect.created_at,
+        status="sent",
+        prospect_id=prospect.id,
+        sequence_id=sequence.id,
+    ))
+    db.add(Enrollment(prospect_id=prospect.id, sequence_id=sequence.id, campaign_key="acquire:test", status="active"))
+    db.add(Suppression(prospect_id=prospect.id, email=prospect.email, scope="global", reason="unsubscribe"))
+    db.add(ActivityEvent(prospect_id=prospect.id, event_type="acquire.reply_received", source_module="acquire"))
+    db.add(Conversation(prospect_id=prospect.id, campaign_key="acquire:test", channel="gmail", provider_thread_id="thread-del", state="waiting_on_us"))
+    db.add(Asset(prospect_id=prospect.id, asset_type="business_card_image", storage_backend="local", storage_path="cards/delete.jpg"))
+    db.add(LeadCapture(prospect_id=prospect.id, source_type="web_discovery", review_status="approved", external_ref="acquire:test:1"))
+    db.commit()
+    prospect_id = prospect.id
+    prospect_email = prospect.email
+
+    resp = client.delete(f"/prospects/{prospect_id}")
+
+    assert resp.status_code == 200
+    db.expire_all()
+    assert db.get(Prospect, prospect_id) is None
+    assert db.exec(select(Enrollment).where(Enrollment.prospect_id == prospect_id)).all() == []
+    assert db.exec(select(Conversation).where(Conversation.prospect_id == prospect_id)).all() == []
+    assert db.exec(select(Asset).where(Asset.prospect_id == prospect_id)).all() == []
+    assert db.exec(select(ScheduledEmail).where(ScheduledEmail.prospect_id == prospect_id)).all() == []
+    detached_sent = db.exec(select(SentEmail).where(SentEmail.to == prospect_email)).one()
+    detached_suppression = db.exec(select(Suppression).where(Suppression.email == prospect_email)).one()
+    detached_event = db.exec(select(ActivityEvent).where(ActivityEvent.event_type == "acquire.reply_received")).one()
+    detached_capture = db.exec(select(LeadCapture).where(LeadCapture.external_ref == "acquire:test:1")).one()
+    assert detached_sent.prospect_id is None
+    assert detached_suppression.prospect_id is None
+    assert detached_event.prospect_id is None
+    assert detached_capture.prospect_id is None
 
 
 def test_prospect_lifecycle_action_updates_stage_and_closes_conversations(client, db):
@@ -633,6 +713,34 @@ def test_worker_campaign_run_proxy_records_activity(client, db, monkeypatch):
     assert event.campaign_key == "alpha"
 
 
+def test_worker_campaign_discover_proxy_records_activity(client, db, monkeypatch):
+    import app.main as app_main
+
+    class DummyResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"message": "started", "campaign": "alpha", "dry_run": True, "count": 12}
+
+    def fake_post(url: str, json: dict, timeout: int):
+        assert url.endswith("/api/campaigns/alpha/discover")
+        assert json == {"dry_run": True, "count": 12}
+        assert timeout == 5
+        return DummyResponse()
+
+    monkeypatch.setattr(app_main.requests, "post", fake_post)
+    resp = client.post("/acquire/worker/campaigns/alpha/discover", json={"dry_run": True, "count": 12})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["campaign"] == "alpha"
+    assert payload["count"] == 12
+
+    event = db.exec(select(ActivityEvent).where(ActivityEvent.event_type == "acquire.worker_discovery_requested")).first()
+    assert event is not None
+    assert event.campaign_key == "alpha"
+
+
 def test_worker_campaign_detail_proxy_returns_payload(client, monkeypatch):
     import app.main as app_main
 
@@ -661,6 +769,53 @@ def test_worker_campaign_detail_proxy_returns_payload(client, monkeypatch):
     payload = resp.json()
     assert payload["name"] == "alpha"
     assert payload["config"]["campaign"]["product"] == "TallyExpress"
+
+
+def test_worker_campaign_activity_proxy_returns_payload(client, monkeypatch):
+    import app.main as app_main
+
+    class DummyResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"entries": [{"id": 1, "ts": "2026-04-27T00:00:00Z", "campaign": "alpha", "level": "info", "message": "Cycle completed"}], "max_id": 1}
+
+    def fake_get(url: str, params: dict, timeout: int):
+        assert url.endswith("/api/campaigns/alpha/activity")
+        assert params == {"since_id": 0, "limit": 100}
+        assert timeout == 5
+        return DummyResponse()
+
+    monkeypatch.setattr(app_main.requests, "get", fake_get)
+    resp = client.get("/acquire/worker/campaigns/alpha/activity")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["max_id"] == 1
+    assert payload["entries"][0]["message"] == "Cycle completed"
+
+
+def test_worker_campaign_traces_proxy_returns_payload(client, monkeypatch):
+    import app.main as app_main
+
+    class DummyResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"entries": [{"id": 1, "ts": "2026-04-27T00:00:00Z", "campaign": "alpha", "run_id": "run-1", "kind": "discover", "event": "model_request", "payload": "{}"}]}
+
+    def fake_get(url: str, params: dict, timeout: int):
+        assert url.endswith("/api/campaigns/alpha/traces")
+        assert params == {"limit": 100, "run_id": None}
+        assert timeout == 5
+        return DummyResponse()
+
+    monkeypatch.setattr(app_main.requests, "get", fake_get)
+    resp = client.get("/acquire/worker/campaigns/alpha/traces")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload[0]["event"] == "model_request"
 
 
 def test_worker_campaign_update_proxy_records_activity(client, db, monkeypatch):

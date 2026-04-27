@@ -36,9 +36,14 @@ from app.schemas import (
     AcquisitionCampaignSummaryRead,
     WorkerCampaignRead,
     WorkerCampaignRunRequest,
+    WorkerCampaignDiscoverRequest,
     WorkerCampaignDetailRead,
     WorkerCampaignUpdateRequest,
     WorkerCampaignSnapshotRead,
+    ProspectUpdate,
+    LeadCaptureReviewResponse,
+    WorkerCampaignActivityFeedRead,
+    WorkerCampaignTraceEntryRead,
 )
 from app.mailer import send_email
 from app.config import settings
@@ -735,11 +740,13 @@ def get_prospect(pid: int, db: Session = Depends(get_session)):
     return prospect
 
 @app.put("/prospects/{pid}", dependencies=[Depends(require_api_key)])
-def edit_prospect(pid: int, data: Prospect, db: Session = Depends(get_session)):
+def edit_prospect(pid: int, data: ProspectUpdate, db: Session = Depends(get_session)):
     obj = db.get(Prospect, pid)
     if not obj:
         raise HTTPException(status_code=404, detail="Prospect not found")
-    updates = data.dict(exclude_unset=True)
+    updates = data.model_dump(exclude_unset=True) if hasattr(data, "model_dump") else data.dict(exclude_unset=True)
+    if "email" in updates and updates["email"]:
+        updates["email"] = updates["email"].strip().lower()
     if "sequence_id" in updates and updates["sequence_id"] is None:
         db.exec(delete(ScheduledEmail).where(ScheduledEmail.prospect_id == pid))
     for k, v in updates.items():
@@ -1723,7 +1730,7 @@ def list_lead_captures(
     return db.exec(stmt).all()
 
 
-@app.post("/lead-captures/{capture_id}/review", dependencies=[Depends(require_api_key)])
+@app.post("/lead-captures/{capture_id}/review", response_model=LeadCaptureReviewResponse, dependencies=[Depends(require_api_key)])
 def review_lead_capture(capture_id: int, payload: LeadCaptureReviewRequest, db: Session = Depends(get_session)):
     if payload.review_status not in {"approved", "rejected"}:
         raise HTTPException(status_code=400, detail="review_status must be approved or rejected")
@@ -1796,7 +1803,12 @@ def review_lead_capture(capture_id: int, payload: LeadCaptureReviewRequest, db: 
         )
 
     db.commit()
-    return {"message": "review recorded", "capture_id": capture.id, "review_status": capture.review_status}
+    return {
+        "message": "review recorded",
+        "capture_id": capture.id,
+        "review_status": capture.review_status,
+        "prospect_id": prospect.id if prospect else capture.prospect_id,
+    }
 
 
 @app.get("/activity-events", response_model=List[ActivityEventRead], dependencies=[Depends(require_api_key)])
@@ -2002,6 +2014,41 @@ def run_worker_campaign(campaign_name: str, payload: WorkerCampaignRunRequest, d
         raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
 
 
+@app.post("/acquire/worker/campaigns/{campaign_name}/discover", dependencies=[Depends(require_api_key)])
+def discover_worker_campaign(campaign_name: str, payload: WorkerCampaignDiscoverRequest, db: Session = Depends(get_session)):
+    try:
+        res = requests.post(
+            f"{_worker_base_url()}/api/campaigns/{campaign_name}/discover",
+            json={"dry_run": payload.dry_run, "count": payload.count},
+            timeout=5,
+        )
+        if res.status_code == 404:
+            raise HTTPException(status_code=404, detail="Worker campaign not found")
+        if res.status_code >= 400:
+            detail = res.json().get("error", res.text)
+            raise HTTPException(status_code=res.status_code, detail=detail)
+        snapshot = db.exec(select(WorkerCampaignSnapshot).where(WorkerCampaignSnapshot.name == campaign_name)).first()
+        if snapshot:
+            snapshot.running = True
+            snapshot.started = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+            snapshot.error = None
+            snapshot.synced_at = datetime.utcnow()
+            db.add(snapshot)
+        _record_activity_event(
+            db,
+            campaign_key=campaign_name,
+            event_type="acquire.worker_discovery_requested",
+            source_module="ops",
+            payload={"dry_run": payload.dry_run, "count": payload.count},
+        )
+        db.commit()
+        return res.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
+
+
 @app.get("/acquire/worker/campaigns/{campaign_name}", response_model=WorkerCampaignDetailRead, dependencies=[Depends(require_api_key)])
 def worker_campaign_detail(campaign_name: str, db: Session = Depends(get_session)):
     try:
@@ -2028,6 +2075,46 @@ def worker_campaign_detail(campaign_name: str, db: Session = Depends(get_session
                 started=cached.started,
                 error=cached.error,
             )
+        raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
+
+
+@app.get("/acquire/worker/campaigns/{campaign_name}/activity", response_model=WorkerCampaignActivityFeedRead, dependencies=[Depends(require_api_key)])
+def worker_campaign_activity(campaign_name: str, since_id: int = 0, limit: int = 100):
+    try:
+        res = requests.get(
+            f"{_worker_base_url()}/api/campaigns/{campaign_name}/activity",
+            params={"since_id": since_id, "limit": limit},
+            timeout=5,
+        )
+        if res.status_code == 404:
+            raise HTTPException(status_code=404, detail="Worker campaign not found")
+        if res.status_code >= 400:
+            detail = res.json().get("error", res.text)
+            raise HTTPException(status_code=res.status_code, detail=detail)
+        return res.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
+
+
+@app.get("/acquire/worker/campaigns/{campaign_name}/traces", response_model=List[WorkerCampaignTraceEntryRead], dependencies=[Depends(require_api_key)])
+def worker_campaign_traces(campaign_name: str, limit: int = 100, run_id: Optional[str] = None):
+    try:
+        res = requests.get(
+            f"{_worker_base_url()}/api/campaigns/{campaign_name}/traces",
+            params={"limit": limit, "run_id": run_id},
+            timeout=5,
+        )
+        if res.status_code == 404:
+            raise HTTPException(status_code=404, detail="Worker campaign not found")
+        if res.status_code >= 400:
+            detail = res.json().get("error", res.text)
+            raise HTTPException(status_code=res.status_code, detail=detail)
+        return res.json().get("entries", [])
+    except HTTPException:
+        raise
+    except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
 
 

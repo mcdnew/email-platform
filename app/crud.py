@@ -16,6 +16,11 @@ from app.models import (
     ScheduledEmail,
     SentEmail,
     Enrollment,
+    Suppression,
+    ActivityEvent,
+    Conversation,
+    Asset,
+    LeadCapture,
     EmailTemplateUpdate,
 )
 from app.config import settings
@@ -67,13 +72,32 @@ def update_prospect(session: Session, p: Prospect) -> Prospect:
     return p
 
 def delete_prospect(session: Session, pid: int) -> bool:
-    """Delete prospect and any related ScheduledEmail and SentEmail rows."""
+    """Delete a prospect while preserving compliance/audit rows where practical."""
     prospect = session.get(Prospect, pid)
     if not prospect:
         return False
-    # bulk-delete their schedules and sent records
+
+    # Required child rows must be deleted before the prospect itself.
+    session.exec(delete(Enrollment).where(Enrollment.prospect_id == pid))
+    session.exec(delete(Conversation).where(Conversation.prospect_id == pid))
+    session.exec(delete(Asset).where(Asset.prospect_id == pid))
     session.exec(delete(ScheduledEmail).where(ScheduledEmail.prospect_id == pid))
-    session.exec(delete(SentEmail).where(SentEmail.prospect_id == pid))
+
+    # Optional references are detached so audit/suppression history can survive
+    # the contact deletion without violating FK constraints.
+    for sent in session.exec(select(SentEmail).where(SentEmail.prospect_id == pid)).all():
+        sent.prospect_id = None
+        session.add(sent)
+    for suppression in session.exec(select(Suppression).where(Suppression.prospect_id == pid)).all():
+        suppression.prospect_id = None
+        session.add(suppression)
+    for event in session.exec(select(ActivityEvent).where(ActivityEvent.prospect_id == pid)).all():
+        event.prospect_id = None
+        session.add(event)
+    for capture in session.exec(select(LeadCapture).where(LeadCapture.prospect_id == pid)).all():
+        capture.prospect_id = None
+        session.add(capture)
+
     session.delete(prospect)
     session.commit()
     return True

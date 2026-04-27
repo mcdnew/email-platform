@@ -4,7 +4,14 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getWorkerCampaignDetail, runWorkerCampaign, updateWorkerCampaign } from '@/lib/api'
+import {
+  discoverWorkerCampaign,
+  getWorkerCampaignActivity,
+  getWorkerCampaignDetail,
+  getWorkerCampaignTraces,
+  runWorkerCampaign,
+  updateWorkerCampaign,
+} from '@/lib/api'
 
 export default function AcquireCampaignDetailPage() {
   const params = useParams<{ campaignName: string }>()
@@ -12,27 +19,63 @@ export default function AcquireCampaignDetailPage() {
   const qc = useQueryClient()
   const [configJson, setConfigJson] = useState('')
   const [previewTab, setPreviewTab] = useState<'json' | 'text' | 'html'>('json')
+  const [discoverCount, setDiscoverCount] = useState('10')
+  const [selectedRunId, setSelectedRunId] = useState('all')
+  const [selectedTraceEvent, setSelectedTraceEvent] = useState('all')
+  const [truncateAt, setTruncateAt] = useState('1200')
 
   const { data, isLoading } = useQuery({
     queryKey: ['worker-campaign-detail', campaignName],
     queryFn: () => getWorkerCampaignDetail(campaignName),
     enabled: Boolean(campaignName),
+    refetchInterval: (query) => query.state.data?.running ? 4000 : false,
+  })
+  const { data: activityFeed } = useQuery({
+    queryKey: ['worker-campaign-activity', campaignName],
+    queryFn: () => getWorkerCampaignActivity(campaignName, { limit: 40 }),
+    enabled: Boolean(campaignName),
+    refetchInterval: data?.running ? 4000 : false,
+  })
+  const { data: traceEntries } = useQuery({
+    queryKey: ['worker-campaign-traces', campaignName, selectedRunId],
+    queryFn: () => getWorkerCampaignTraces(campaignName, { limit: 120, run_id: selectedRunId === 'all' ? undefined : selectedRunId }),
+    enabled: Boolean(campaignName),
+    refetchInterval: data?.running ? 4000 : false,
   })
 
   const runMutation = useMutation({
     mutationFn: ({ dryRun }: { dryRun: boolean }) => runWorkerCampaign(campaignName, { dry_run: dryRun }),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['worker-campaign-detail', campaignName] })
-      await qc.invalidateQueries({ queryKey: ['worker-campaigns'] })
-      await qc.invalidateQueries({ queryKey: ['activity-events'] })
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['worker-campaign-detail', campaignName] }),
+        qc.invalidateQueries({ queryKey: ['worker-campaigns'] }),
+        qc.invalidateQueries({ queryKey: ['activity-events'] }),
+        qc.invalidateQueries({ queryKey: ['worker-campaign-activity', campaignName] }),
+        qc.invalidateQueries({ queryKey: ['worker-campaign-traces', campaignName] }),
+      ])
+    },
+  })
+  const discoverMutation = useMutation({
+    mutationFn: ({ dryRun }: { dryRun: boolean }) =>
+      discoverWorkerCampaign(campaignName, { dry_run: dryRun, count: Number(discoverCount) || undefined }),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['worker-campaign-detail', campaignName] }),
+        qc.invalidateQueries({ queryKey: ['worker-campaigns'] }),
+        qc.invalidateQueries({ queryKey: ['activity-events'] }),
+        qc.invalidateQueries({ queryKey: ['worker-campaign-activity', campaignName] }),
+        qc.invalidateQueries({ queryKey: ['worker-campaign-traces', campaignName] }),
+      ])
     },
   })
   const saveMutation = useMutation({
     mutationFn: (config: Record<string, unknown>) => updateWorkerCampaign(campaignName, { config }),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['worker-campaign-detail', campaignName] })
-      await qc.invalidateQueries({ queryKey: ['worker-campaigns'] })
-      await qc.invalidateQueries({ queryKey: ['activity-events'] })
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['worker-campaign-detail', campaignName] }),
+        qc.invalidateQueries({ queryKey: ['worker-campaigns'] }),
+        qc.invalidateQueries({ queryKey: ['activity-events'] }),
+      ])
     },
   })
 
@@ -40,6 +83,69 @@ export default function AcquireCampaignDetailPage() {
   const campaign = (cfg.campaign as Record<string, unknown> | undefined) ?? {}
   const discover = (cfg.discover as Record<string, unknown> | undefined) ?? {}
   const sequence = (cfg.sequence as Array<Record<string, unknown>> | undefined) ?? []
+  const truncationLimit = truncateAt === 'full' ? Number.POSITIVE_INFINITY : Number(truncateAt)
+
+  function safeParsePayload(value: string | null): Record<string, unknown> | null {
+    if (!value) return null
+    try {
+      return JSON.parse(value) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+
+  const parsedTraceEntries = (traceEntries ?? []).map((entry) => ({
+    ...entry,
+    parsedPayload: safeParsePayload(entry.payload),
+  }))
+  const availableRunIds = Array.from(new Set(parsedTraceEntries.map((entry) => entry.run_id).filter(Boolean))) as string[]
+  const availableEvents = Array.from(new Set(parsedTraceEntries.map((entry) => entry.event))).sort()
+  const filteredTraceEntries = parsedTraceEntries.filter((entry) => selectedTraceEvent === 'all' || entry.event === selectedTraceEvent)
+  const runSummaries = availableRunIds.map((runId) => {
+    const entriesForRun = parsedTraceEntries.filter((entry) => entry.run_id === runId)
+    const first = entriesForRun[entriesForRun.length - 1]
+    const last = entriesForRun[0]
+    const usageTotals = entriesForRun.reduce((acc, entry) => {
+      const usage = entry.parsedPayload?.usage as Record<string, unknown> | undefined
+      acc.input_tokens += Number(usage?.input_tokens ?? 0)
+      acc.output_tokens += Number(usage?.output_tokens ?? 0)
+      acc.cache_creation_input_tokens += Number(usage?.cache_creation_input_tokens ?? 0)
+      acc.cache_read_input_tokens += Number(usage?.cache_read_input_tokens ?? 0)
+      return acc
+    }, { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 })
+    return {
+      runId,
+      kind: first?.kind ?? '—',
+      startedAt: first?.ts ?? '—',
+      endedAt: last?.ts ?? '—',
+      events: entriesForRun.length,
+      usageTotals,
+    }
+  })
+
+  async function copyTraceBundle() {
+    const bundle = {
+      campaignName,
+      selectedRunId,
+      selectedTraceEvent,
+      truncateAt,
+      activity: activityFeed?.entries ?? [],
+      traces: filteredTraceEntries.map((entry) => ({
+        ...entry,
+        parsedPayload: entry.parsedPayload,
+      })),
+      runSummaries,
+    }
+    await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2))
+  }
+
+  function renderPayload(value: string | null) {
+    if (!value) return ''
+    if (Number.isFinite(truncationLimit) && value.length > truncationLimit) {
+      return `${value.slice(0, truncationLimit)}\n… truncated ${value.length - truncationLimit} chars`
+    }
+    return value
+  }
   const textPreview = [
     `Campaign: ${campaignName}`,
     `Product: ${String(campaign.product ?? '—')}`,
@@ -90,21 +196,44 @@ export default function AcquireCampaignDetailPage() {
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {String(campaign.product ?? '')}
           </p>
+          <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+            `Run cycle` only processes existing active prospects. Use `Discover` to generate new leads.
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => runMutation.mutate({ dryRun: false })}
             className="px-3 py-2 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
             disabled={runMutation.isPending || Boolean(data?.running)}
           >
-            Run
+            Run cycle
           </button>
           <button
             onClick={() => runMutation.mutate({ dryRun: true })}
             className="px-3 py-2 text-xs rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
             disabled={runMutation.isPending || Boolean(data?.running)}
           >
-            Dry run
+            Dry run cycle
+          </button>
+          <input
+            value={discoverCount}
+            onChange={(event) => setDiscoverCount(event.target.value)}
+            className="w-20 px-2 py-2 text-xs rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+            aria-label="Discover count"
+          />
+          <button
+            onClick={() => discoverMutation.mutate({ dryRun: false })}
+            className="px-3 py-2 text-xs rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+            disabled={discoverMutation.isPending || Boolean(data?.running)}
+          >
+            Discover
+          </button>
+          <button
+            onClick={() => discoverMutation.mutate({ dryRun: true })}
+            className="px-3 py-2 text-xs rounded-md bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900 disabled:opacity-50"
+            disabled={discoverMutation.isPending || Boolean(data?.running)}
+          >
+            Dry run discover
           </button>
           <button
             onClick={() => {
@@ -112,7 +241,7 @@ export default function AcquireCampaignDetailPage() {
                 const parsed = JSON.parse(configJson) as Record<string, unknown>
                 saveMutation.mutate(parsed)
               } catch {
-                // Keep the current page-level interaction minimal; invalid JSON just aborts save.
+                // invalid JSON aborts save
               }
             }}
             className="px-3 py-2 text-xs rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
@@ -137,6 +266,7 @@ export default function AcquireCampaignDetailPage() {
               <div><span className="font-medium">Tone:</span> {String(campaign.tone ?? '—')}</div>
               <div><span className="font-medium">Sender:</span> {String(campaign.sender_name ?? '—')}</div>
               <div><span className="font-medium">Status:</span> {data.running ? 'running' : 'idle'}</div>
+              <div><span className="font-medium">Mode:</span> {data.mode ?? 'cycle'}</div>
             </div>
           </section>
 
@@ -207,6 +337,93 @@ export default function AcquireCampaignDetailPage() {
                 ))}
               </div>
             )}
+          </section>
+
+          <section className="xl:col-span-3 grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">Worker Activity</h2>
+              {!activityFeed?.entries.length ? (
+                <p className="text-sm text-gray-500">No worker activity yet.</p>
+              ) : (
+                <div className="space-y-2 max-h-[420px] overflow-auto">
+                  {activityFeed.entries.map((entry) => (
+                    <div key={entry.id} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
+                      <div className="text-xs text-gray-400">{entry.ts} • {entry.level}</div>
+                      <div className="mt-1 text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{entry.message}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">LLM / Tool Trace</h2>
+                <div className="flex flex-wrap gap-2">
+                  <select
+                    value={selectedRunId}
+                    onChange={(event) => setSelectedRunId(event.target.value)}
+                    className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                  >
+                    <option value="all">All runs</option>
+                    {availableRunIds.map((runId) => <option key={runId} value={runId}>{runId}</option>)}
+                  </select>
+                  <select
+                    value={selectedTraceEvent}
+                    onChange={(event) => setSelectedTraceEvent(event.target.value)}
+                    className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                  >
+                    <option value="all">All events</option>
+                    {availableEvents.map((eventName) => <option key={eventName} value={eventName}>{eventName}</option>)}
+                  </select>
+                  <select
+                    value={truncateAt}
+                    onChange={(event) => setTruncateAt(event.target.value)}
+                    className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                  >
+                    <option value="300">300 chars</option>
+                    <option value="1200">1200 chars</option>
+                    <option value="4000">4000 chars</option>
+                    <option value="full">Full payload</option>
+                  </select>
+                  <button
+                    onClick={() => { void copyTraceBundle() }}
+                    className="px-2.5 py-1.5 text-xs rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
+                  >
+                    Copy trace bundle
+                  </button>
+                </div>
+              </div>
+              {!!runSummaries.length && (
+                <div className="mb-4 space-y-2">
+                  {runSummaries.map((summary) => (
+                    <div key={summary.runId} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
+                      <div className="text-xs text-gray-400">{summary.kind} • run {summary.runId}</div>
+                      <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
+                        <span>Started</span><span className="text-right">{summary.startedAt}</span>
+                        <span>Ended</span><span className="text-right">{summary.endedAt}</span>
+                        <span>Trace events</span><span className="text-right">{summary.events}</span>
+                        <span>Input tokens</span><span className="text-right">{summary.usageTotals.input_tokens}</span>
+                        <span>Output tokens</span><span className="text-right">{summary.usageTotals.output_tokens}</span>
+                        <span>Cache create</span><span className="text-right">{summary.usageTotals.cache_creation_input_tokens}</span>
+                        <span>Cache read</span><span className="text-right">{summary.usageTotals.cache_read_input_tokens}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!filteredTraceEntries.length ? (
+                <p className="text-sm text-gray-500">No trace entries yet.</p>
+              ) : (
+                <div className="space-y-2 max-h-[420px] overflow-auto">
+                  {filteredTraceEntries.map((entry) => (
+                    <div key={entry.id} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
+                      <div className="text-xs text-gray-400">{entry.ts} • {entry.kind} • {entry.event} • run {entry.run_id ?? '—'}</div>
+                      <pre className="mt-2 text-[11px] whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">{renderPayload(entry.payload)}</pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         </div>
       )}

@@ -2,8 +2,9 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getAcquisitionCampaignSummaries, getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, getWorkerCampaigns, handoffOutreachToNurture, reviewLeadCapture, runWorkerCampaign } from '@/lib/api'
+import { discoverWorkerCampaign, getAcquisitionCampaignSummaries, getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, getWorkerCampaigns, handoffOutreachToNurture, reviewLeadCapture, runWorkerCampaign } from '@/lib/api'
 
 function parseJson(value: string | null): Record<string, unknown> {
   if (!value) return {}
@@ -15,9 +16,11 @@ function parseJson(value: string | null): Record<string, unknown> {
 }
 
 export default function AcquirePage() {
+  const router = useRouter()
   const qc = useQueryClient()
   const [selectedSequences, setSelectedSequences] = useState<Record<number, string>>({})
   const [captureEmails, setCaptureEmails] = useState<Record<number, string>>({})
+  const [discoverCounts, setDiscoverCounts] = useState<Record<string, string>>({})
   const { data: pendingCaptures, isLoading: capturesLoading } = useQuery({
     queryKey: ['lead-captures', 'pending_review'],
     queryFn: () => getLeadCaptures({ review_status: 'pending_review', source_type: 'web_discovery' }),
@@ -50,11 +53,14 @@ export default function AcquirePage() {
   const reviewMutation = useMutation({
     mutationFn: ({ id, review_status, email, name, company }: { id: number; review_status: 'approved' | 'rejected'; email?: string; name?: string; company?: string }) =>
       reviewLeadCapture(id, { review_status, email, name, company }),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['lead-captures'] }),
         qc.invalidateQueries({ queryKey: ['prospects'] }),
       ])
+      if (result.review_status === 'approved' && result.prospect_id) {
+        router.push(`/acquire/${result.prospect_id}`)
+      }
     },
   })
   const handoffMutation = useMutation({
@@ -79,6 +85,17 @@ export default function AcquirePage() {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['worker-campaigns'] }),
         qc.invalidateQueries({ queryKey: ['activity-events'] }),
+      ])
+    },
+  })
+  const discoverCampaignMutation = useMutation({
+    mutationFn: ({ campaignName, dryRun, count }: { campaignName: string; dryRun: boolean; count?: number }) =>
+      discoverWorkerCampaign(campaignName, { dry_run: dryRun, count }),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['worker-campaigns'] }),
+        qc.invalidateQueries({ queryKey: ['activity-events'] }),
+        qc.invalidateQueries({ queryKey: ['lead-captures'] }),
       ])
     },
   })
@@ -153,14 +170,44 @@ export default function AcquirePage() {
                     className="px-2.5 py-1.5 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                     disabled={runCampaignMutation.isPending || campaign.running}
                   >
-                    Run
+                    Run cycle
                   </button>
                   <button
                     onClick={() => runCampaignMutation.mutate({ campaignName: campaign.name, dryRun: true })}
                     className="px-2.5 py-1.5 text-xs rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
                     disabled={runCampaignMutation.isPending || campaign.running}
                   >
-                    Dry run
+                    Dry run cycle
+                  </button>
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={discoverCounts[campaign.name] ?? String(campaign.discover_count || 10)}
+                    onChange={(event) => setDiscoverCounts((current) => ({ ...current, [campaign.name]: event.target.value }))}
+                    className="w-20 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                    aria-label={`Discover count for ${campaign.name}`}
+                  />
+                  <button
+                    onClick={() => discoverCampaignMutation.mutate({
+                      campaignName: campaign.name,
+                      dryRun: false,
+                      count: Number(discoverCounts[campaign.name] ?? campaign.discover_count ?? 10) || undefined,
+                    })}
+                    className="px-2.5 py-1.5 text-xs rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                    disabled={discoverCampaignMutation.isPending || campaign.running}
+                  >
+                    Discover
+                  </button>
+                  <button
+                    onClick={() => discoverCampaignMutation.mutate({
+                      campaignName: campaign.name,
+                      dryRun: true,
+                      count: Number(discoverCounts[campaign.name] ?? campaign.discover_count ?? 10) || undefined,
+                    })}
+                    className="px-2.5 py-1.5 text-xs rounded-md bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900 disabled:opacity-50"
+                    disabled={discoverCampaignMutation.isPending || campaign.running}
+                  >
+                    Dry run discover
                   </button>
                 </div>
                 {campaign.error && <div className="mt-2 text-[11px] text-red-500">{campaign.error}</div>}
@@ -216,10 +263,10 @@ export default function AcquirePage() {
                       <div className="flex gap-2">
                         {capture.prospect_id ? (
                           <Link
-                            href="/prospects"
+                            href={`/acquire/${capture.prospect_id}`}
                             className="px-2.5 py-1.5 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700"
                           >
-                            Open prospects
+                            Open prospect
                           </Link>
                         ) : null}
                         <button

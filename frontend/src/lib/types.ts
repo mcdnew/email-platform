@@ -82,6 +82,30 @@ export interface WorkerCampaignDetail {
   running: boolean
   started: string | null
   error: string | null
+  mode?: string | null
+}
+
+export interface WorkerCampaignActivityEntry {
+  id: number
+  ts: string
+  campaign: string | null
+  level: string
+  message: string
+}
+
+export interface WorkerCampaignActivityFeed {
+  entries: WorkerCampaignActivityEntry[]
+  max_id: number
+}
+
+export interface WorkerCampaignTraceEntry {
+  id: number
+  ts: string
+  campaign: string
+  run_id: string | null
+  kind: string
+  event: string
+  payload: string | null
 }
 
 export interface ProspectCreate {

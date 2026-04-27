@@ -5,6 +5,7 @@ import type {
   Prospect, ProspectCreate, EmailTemplate, Sequence, SequenceStep,
   ScheduledEmail, SentEmail, AnalyticsSummary, PaginatedResponse, BulkImportResult, LeadCapture,
   ActivityEvent, Conversation, AcquisitionCampaignSummary, WorkerCampaign, WorkerCampaignDetail,
+  WorkerCampaignActivityFeed, WorkerCampaignTraceEntry,
 } from './types'
 
 async function req<T>(
@@ -197,7 +198,7 @@ export const reviewLeadCapture = (id: number, data: {
   company?: string
   title?: string
 }) =>
-  req<{ message: string; capture_id: number; review_status: string }>(`/lead-captures/${id}/review`, {
+  req<{ message: string; capture_id: number; review_status: string; prospect_id?: number | null }>(`/lead-captures/${id}/review`, {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -248,8 +249,20 @@ export const runWorkerCampaign = (campaignName: string, data: { dry_run?: boolea
     body: JSON.stringify({ dry_run: data.dry_run ?? false }),
   })
 
+export const discoverWorkerCampaign = (campaignName: string, data: { dry_run?: boolean; count?: number } = {}) =>
+  req<{ message: string; campaign: string; dry_run: boolean; count?: number | null }>(`/acquire/worker/campaigns/${campaignName}/discover`, {
+    method: 'POST',
+    body: JSON.stringify({ dry_run: data.dry_run ?? false, count: data.count }),
+  })
+
 export const getWorkerCampaignDetail = (campaignName: string) =>
   req<WorkerCampaignDetail>(`/acquire/worker/campaigns/${campaignName}`)
+
+export const getWorkerCampaignActivity = (campaignName: string, params: { since_id?: number; limit?: number } = {}) =>
+  req<WorkerCampaignActivityFeed>(`/acquire/worker/campaigns/${campaignName}/activity${buildQs(params)}`)
+
+export const getWorkerCampaignTraces = (campaignName: string, params: { limit?: number; run_id?: string } = {}) =>
+  req<WorkerCampaignTraceEntry[]>(`/acquire/worker/campaigns/${campaignName}/traces${buildQs(params)}`)
 
 export const updateWorkerCampaign = (campaignName: string, data: { config: Record<string, unknown> }) =>
   req<{ message: string; campaign: string }>(`/acquire/worker/campaigns/${campaignName}`, {
