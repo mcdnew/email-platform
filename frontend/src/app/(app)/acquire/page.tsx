@@ -258,6 +258,7 @@ export default function AcquirePage() {
                 const email = normalized.email as string | undefined
                 const fact = normalized.fact as string | undefined
                 const name = normalized.name as string | undefined
+                const campaignKey = normalized.campaign_key as string | undefined
                 const captureEmail = captureEmails[capture.id] ?? email ?? ''
                 return (
                   <div key={capture.id} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
@@ -272,6 +273,11 @@ export default function AcquirePage() {
                         <div className="mt-2 text-[11px] uppercase tracking-wide text-gray-400">
                           {capture.prospect_id ? 'promoted to prospect' : 'lead capture only'}
                         </div>
+                        {campaignKey && (
+                          <div className="mt-1 text-[11px] uppercase tracking-wide text-blue-600 dark:text-blue-400">
+                            {campaignKey}
+                          </div>
+                        )}
                         {fact && <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">{fact}</p>}
                         {!email && (
                           <input
@@ -301,9 +307,9 @@ export default function AcquirePage() {
                             company,
                           })}
                           className="px-2.5 py-1.5 text-xs rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                          disabled={reviewMutation.isPending}
+                          disabled={reviewMutation.isPending || (!capture.prospect_id && !captureEmail)}
                         >
-                          Approve
+                          {capture.prospect_id || captureEmail ? 'Approve' : 'Needs email'}
                         </button>
                         <button
                           onClick={() => reviewMutation.mutate({ id: capture.id, review_status: 'rejected' })}
