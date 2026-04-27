@@ -1,18 +1,23 @@
 'use client'
 
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getActivityEventsByProspect, getConversationsByProspect, getProspectTimeline, getProspects, updateProspectLifecycle } from '@/lib/api'
+import { deleteProspect, getActivityEventsByProspect, getConversationsByProspect, getProspect, getProspectTimeline, updateProspect, updateProspectLifecycle } from '@/lib/api'
 
 export default function AcquireProspectDetailPage() {
   const params = useParams<{ prospectId: string }>()
   const prospectId = Number(params.prospectId)
+  const router = useRouter()
   const qc = useQueryClient()
+  const [isEditing, setIsEditing] = useState(false)
+  const [form, setForm] = useState({ name: '', email: '', company: '', title: '', phone: '', notes: '' })
 
-  const { data: prospectPage, isLoading: prospectLoading } = useQuery({
+  const { data: prospect, isLoading: prospectLoading } = useQuery({
     queryKey: ['acquire-prospect', prospectId],
-    queryFn: () => getProspects({ page: 1, per_page: 200 }),
+    queryFn: () => getProspect(prospectId),
+    enabled: Number.isFinite(prospectId),
   })
   const { data: activityEvents, isLoading: eventsLoading } = useQuery({
     queryKey: ['activity-events', 'prospect', prospectId],
@@ -40,8 +45,42 @@ export default function AcquireProspectDetailPage() {
       ])
     },
   })
+  const saveMutation = useMutation({
+    mutationFn: () => updateProspect(prospectId, {
+      name: form.name,
+      email: form.email,
+      company: form.company || undefined,
+      title: form.title || undefined,
+      phone: form.phone || undefined,
+      notes: form.notes || undefined,
+    }),
+    onSuccess: async () => {
+      setIsEditing(false)
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['acquire-prospect', prospectId] }),
+        qc.invalidateQueries({ queryKey: ['prospects'] }),
+      ])
+    },
+  })
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteProspect(prospectId),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['prospects'] })
+      router.push('/acquire')
+    },
+  })
 
-  const prospect = prospectPage?.items.find((item) => item.id === prospectId)
+  useEffect(() => {
+    if (!prospect) return
+    setForm({
+      name: prospect.name ?? '',
+      email: prospect.email ?? '',
+      company: prospect.company ?? '',
+      title: prospect.title ?? '',
+      phone: prospect.phone ?? '',
+      notes: prospect.notes ?? '',
+    })
+  }, [prospect])
 
   return (
     <div className="p-6 space-y-6">
@@ -59,6 +98,22 @@ export default function AcquireProspectDetailPage() {
         </div>
         {prospect && (
           <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setIsEditing((value) => !value)}
+              className="px-3 py-2 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700"
+            >
+              {isEditing ? 'Cancel edit' : 'Edit prospect'}
+            </button>
+            <button
+              onClick={() => {
+                if (!window.confirm(`Delete ${prospect.name}? This cannot be undone.`)) return
+                deleteMutation.mutate()
+              }}
+              className="px-3 py-2 text-xs rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              disabled={deleteMutation.isPending}
+            >
+              Delete prospect
+            </button>
             {prospect.lifecycle_stage === 'interested' && (
               <button
                 onClick={() => lifecycleMutation.mutate({ targetStage: 'qualified', notes: 'Qualified from acquisition detail view' })}
@@ -89,6 +144,53 @@ export default function AcquireProspectDetailPage() {
           </div>
         )}
       </div>
+
+      {prospect && isEditing && (
+        <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {([
+              ['name', 'Name'],
+              ['email', 'Email'],
+              ['company', 'Company'],
+              ['title', 'Title'],
+              ['phone', 'Phone'],
+            ] as const).map(([field, label]) => (
+              <div key={field}>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{label}</label>
+                <input
+                  value={form[field]}
+                  onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100"
+                />
+              </div>
+            ))}
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Notes</label>
+              <textarea
+                value={form.notes}
+                onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+                rows={4}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100"
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <button
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+              className="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              Save changes
+            </button>
+            <button
+              onClick={() => setIsEditing(false)}
+              className="px-4 py-2 text-sm rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </section>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <section className="xl:col-span-1 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">

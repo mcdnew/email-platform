@@ -727,6 +727,13 @@ def add_prospect(p: Prospect, db: Session = Depends(get_session)):
         db.rollback()
         raise HTTPException(status_code=409, detail="A prospect with this email already exists")
 
+@app.get("/prospects/{pid}", dependencies=[Depends(require_api_key)])
+def get_prospect(pid: int, db: Session = Depends(get_session)):
+    prospect = db.get(Prospect, pid)
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Prospect not found")
+    return prospect
+
 @app.put("/prospects/{pid}", dependencies=[Depends(require_api_key)])
 def edit_prospect(pid: int, data: Prospect, db: Session = Depends(get_session)):
     obj = db.get(Prospect, pid)

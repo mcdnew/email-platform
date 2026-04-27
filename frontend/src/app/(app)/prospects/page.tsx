@@ -15,7 +15,7 @@ import { Toast } from '@/components/Toast'
 import { TimelineDrawer } from '@/components/TimelineDrawer'
 import { PaginationBar } from '@/components/PaginationBar'
 import { useToast } from '@/hooks/useToast'
-import { Upload, Plus, ChevronUp, ChevronDown, Trash2, Link, UserX, Download } from 'lucide-react'
+import { Upload, Plus, Pencil, ChevronUp, ChevronDown, Trash2, Link, UserX, Download } from 'lucide-react'
 import Papa from 'papaparse'
 import { downloadCsv } from '@/lib/csv'
 
@@ -32,6 +32,7 @@ export default function ProspectsPage() {
   const [sortBy, setSortBy] = useState('name')
   const [order, setOrder] = useState('asc')
   const [showAddForm, setShowAddForm] = useState(false)
+  const [editingProspect, setEditingProspect] = useState<Prospect | null>(null)
   const [assignModal, setAssignModal] = useState<number[] | null>(null)
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [unsubFilter, setUnsubFilter] = useState<'all' | 'active' | 'unsubscribed'>('all')
@@ -168,12 +169,23 @@ export default function ProspectsPage() {
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
           <button
+            title="Edit prospect"
+            onClick={() => setEditingProspect(row.original)}
+            className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:text-blue-600 transition-colors">
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+          <button
             title={row.original.unsubscribed ? 'Resubscribe' : 'Unsubscribe'}
             onClick={() => toggleUnsubMut.mutate({ id: row.original.id, unsubscribed: !row.original.unsubscribed })}
             className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${row.original.unsubscribed ? 'text-red-400 hover:text-gray-500' : 'text-gray-400 hover:text-red-500'}`}>
             <UserX className="w-3.5 h-3.5" />
           </button>
-          <button onClick={() => deleteMut.mutate(row.original.id)}
+          <button
+            title="Delete prospect"
+            onClick={() => {
+              if (!window.confirm(`Delete ${row.original.name}? This cannot be undone.`)) return
+              deleteMut.mutate(row.original.id)
+            }}
             className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:text-red-600 transition-colors">
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -229,9 +241,22 @@ export default function ProspectsPage() {
       </div>
 
       {showAddForm && (
-        <AddProspectForm
+        <ProspectForm
           onClose={() => setShowAddForm(false)}
           onSaved={() => { setShowAddForm(false); qc.invalidateQueries({ queryKey: ['prospects'] }); showToast('Prospect added') }}
+          onError={(msg) => showToast(msg, 'err')}
+        />
+      )}
+
+      {editingProspect && (
+        <ProspectForm
+          prospect={editingProspect}
+          onClose={() => setEditingProspect(null)}
+          onSaved={() => {
+            setEditingProspect(null)
+            qc.invalidateQueries({ queryKey: ['prospects'] })
+            showToast('Prospect updated')
+          }}
           onError={(msg) => showToast(msg, 'err')}
         />
       )}
@@ -324,19 +349,32 @@ export default function ProspectsPage() {
   )
 }
 
-function AddProspectForm({ onClose, onSaved, onError }: {
+function ProspectForm({ prospect, onClose, onSaved, onError }: {
+  prospect?: Prospect
   onClose: () => void
   onSaved: () => void
   onError: (msg: string) => void
 }) {
-  const [form, setForm] = useState({ name: '', email: '', company: '', title: '' })
+  const [form, setForm] = useState({
+    name: prospect?.name ?? '',
+    email: prospect?.email ?? '',
+    company: prospect?.company ?? '',
+    title: prospect?.title ?? '',
+  })
   const [loading, setLoading] = useState(false)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     try {
-      await createProspect({ name: form.name, email: form.email, company: form.company || undefined, title: form.title || undefined })
+      const payload = {
+        name: form.name,
+        email: form.email,
+        company: form.company || undefined,
+        title: form.title || undefined,
+      }
+      if (prospect) await updateProspect(prospect.id, payload)
+      else await createProspect(payload)
       onSaved()
     } catch (e: unknown) {
       onError(e instanceof Error ? e.message : String(e))
@@ -347,6 +385,11 @@ function AddProspectForm({ onClose, onSaved, onError }: {
 
   return (
     <form onSubmit={submit} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 mb-4 grid grid-cols-4 gap-3 items-end">
+      <div className="col-span-4">
+        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          {prospect ? 'Edit prospect' : 'Add prospect'}
+        </h2>
+      </div>
       {(['name', 'email', 'company', 'title'] as const).map(f => (
         <div key={f}>
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 capitalize">{f}</label>

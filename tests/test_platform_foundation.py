@@ -164,6 +164,21 @@ def test_business_card_upsert_creates_lead_capture_and_activity(client, db):
     assert event.source_module == "capture"
 
 
+def test_get_prospect_returns_single_prospect(client, db):
+    prospect = Prospect(name="Direct Lookup", email="lookup@example.com", company="Lookup Co", title="Owner")
+    db.add(prospect)
+    db.commit()
+    db.refresh(prospect)
+
+    resp = client.get(f"/prospects/{prospect.id}")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["id"] == prospect.id
+    assert payload["email"] == "lookup@example.com"
+    assert payload["company"] == "Lookup Co"
+
+
 def test_asset_upload_endpoints_create_asset_records(client, db, tmp_path, monkeypatch):
     import app.main as app_main
 

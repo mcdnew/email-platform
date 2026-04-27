@@ -48,7 +48,15 @@ export const getProspects = (params: {
 export const createProspect = (data: ProspectCreate) =>
   req<Prospect>('/prospects', { method: 'POST', body: JSON.stringify(data) })
 
-export const updateProspect = (id: number, data: Partial<ProspectCreate & { sequence_id: number | null; unsubscribed: boolean }>) =>
+export const getProspect = (id: number) =>
+  req<Prospect>(`/prospects/${id}`)
+
+export const updateProspect = (id: number, data: Partial<ProspectCreate & {
+  sequence_id: number | null
+  unsubscribed: boolean
+  phone: string
+  notes: string
+}>) =>
   req<Prospect>(`/prospects/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 
 export const deleteProspect = (id: number) =>

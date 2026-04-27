@@ -6,6 +6,8 @@ export interface Prospect {
   email: string
   company: string | null
   title: string | null
+  phone?: string | null
+  notes?: string | null
   sequence_id: number | null
   sequence_name: string | null
   lifecycle_stage: string | null
