@@ -240,8 +240,8 @@ export const updateProspectLifecycle = (id: number, data: { target_stage: string
 export const getAcquisitionCampaignSummaries = () =>
   req<AcquisitionCampaignSummary[]>('/acquire/campaigns/summary')
 
-export const getWorkerCampaigns = () =>
-  req<WorkerCampaign[]>('/acquire/worker/campaigns')
+export const getWorkerCampaigns = (params: { include_archived?: boolean } = {}) =>
+  req<WorkerCampaign[]>(`/acquire/worker/campaigns${buildQs(params)}`)
 
 export const createWorkerCampaign = (data: { name: string; config: Record<string, unknown> }) =>
   req<{ message: string; campaign: string }>('/acquire/worker/campaigns', {
@@ -272,6 +272,18 @@ export const getWorkerCampaignTraces = (campaignName: string, params: { limit?: 
 
 export const updateWorkerCampaign = (campaignName: string, data: { config: Record<string, unknown> }) =>
   req<{ message: string; campaign: string }>(`/acquire/worker/campaigns/${campaignName}`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const archiveWorkerCampaign = (campaignName: string, data: { archived: boolean }) =>
+  req<{ message: string; campaign: string; archived: boolean }>(`/acquire/worker/campaigns/${campaignName}/archive`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const deleteWorkerCampaign = (campaignName: string, data: { confirm_name: string }) =>
+  req<{ message: string; campaign: string }>(`/acquire/worker/campaigns/${campaignName}/delete`, {
     method: 'POST',
     body: JSON.stringify(data),
   })

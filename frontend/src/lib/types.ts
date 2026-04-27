@@ -64,6 +64,7 @@ export interface WorkerCampaign {
   name: string
   product: string
   language: string
+  archived: boolean
   discover_prompt: string
   discover_count: number
   approval_required: boolean
@@ -83,6 +84,7 @@ export interface WorkerCampaignDetail {
   started: string | null
   error: string | null
   mode?: string | null
+  archived?: boolean
 }
 
 export interface WorkerCampaignActivityEntry {

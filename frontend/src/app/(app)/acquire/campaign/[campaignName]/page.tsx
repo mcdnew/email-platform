@@ -5,6 +5,8 @@ import { useParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  archiveWorkerCampaign,
+  deleteWorkerCampaign,
   discoverWorkerCampaign,
   getWorkerCampaignActivity,
   getWorkerCampaignDetail,
@@ -27,6 +29,7 @@ export default function AcquireCampaignDetailPage() {
   const [selectedRunId, setSelectedRunId] = useState('all')
   const [selectedTraceEvent, setSelectedTraceEvent] = useState('all')
   const [truncateAt, setTruncateAt] = useState('1200')
+  const [deleteConfirmName, setDeleteConfirmName] = useState('')
 
   const { data, isLoading } = useQuery({
     queryKey: ['worker-campaign-detail', campaignName],
@@ -85,6 +88,26 @@ export default function AcquireCampaignDetailPage() {
         qc.invalidateQueries({ queryKey: ['activity-events'] }),
       ])
       showToast('Campaign config saved')
+    },
+    onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
+  })
+  const archiveMutation = useMutation({
+    mutationFn: ({ archived }: { archived: boolean }) => archiveWorkerCampaign(campaignName, { archived }),
+    onSuccess: async (result) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['worker-campaign-detail', campaignName] }),
+        qc.invalidateQueries({ queryKey: ['worker-campaigns'] }),
+      ])
+      showToast(result.archived ? 'Campaign archived' : 'Campaign restored')
+    },
+    onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
+  })
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteWorkerCampaign(campaignName, { confirm_name: deleteConfirmName }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['worker-campaigns'] })
+      showToast('Campaign deleted')
+      window.location.href = '/acquire'
     },
     onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
   })
@@ -214,14 +237,14 @@ export default function AcquireCampaignDetailPage() {
           <button
             onClick={() => runMutation.mutate({ dryRun: false })}
             className="px-3 py-2 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-            disabled={runMutation.isPending || Boolean(data?.running)}
+            disabled={runMutation.isPending || Boolean(data?.running) || Boolean(data?.archived)}
           >
             Run cycle
           </button>
           <button
             onClick={() => runMutation.mutate({ dryRun: true })}
             className="px-3 py-2 text-xs rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
-            disabled={runMutation.isPending || Boolean(data?.running)}
+            disabled={runMutation.isPending || Boolean(data?.running) || Boolean(data?.archived)}
           >
             Dry run cycle
           </button>
@@ -234,16 +257,23 @@ export default function AcquireCampaignDetailPage() {
           <button
             onClick={() => discoverMutation.mutate({ dryRun: false })}
             className="px-3 py-2 text-xs rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
-            disabled={discoverMutation.isPending || Boolean(data?.running)}
+            disabled={discoverMutation.isPending || Boolean(data?.running) || Boolean(data?.archived)}
           >
             Discover
           </button>
           <button
             onClick={() => discoverMutation.mutate({ dryRun: true })}
             className="px-3 py-2 text-xs rounded-md bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900 disabled:opacity-50"
-            disabled={discoverMutation.isPending || Boolean(data?.running)}
+            disabled={discoverMutation.isPending || Boolean(data?.running) || Boolean(data?.archived)}
           >
             Dry run discover
+          </button>
+          <button
+            onClick={() => archiveMutation.mutate({ archived: !Boolean(data?.archived) })}
+            className="px-3 py-2 text-xs rounded-md bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-950 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-900"
+            disabled={archiveMutation.isPending || Boolean(data?.running)}
+          >
+            {data?.archived ? 'Restore' : 'Archive'}
           </button>
           <button
             onClick={() => {
@@ -285,8 +315,33 @@ export default function AcquireCampaignDetailPage() {
               <div><span className="font-medium">Language:</span> {String(campaign.language ?? '—')}</div>
               <div><span className="font-medium">Tone:</span> {String(campaign.tone ?? '—')}</div>
               <div><span className="font-medium">Sender:</span> {String(campaign.sender_name ?? '—')}</div>
-              <div><span className="font-medium">Status:</span> {data.running ? 'running' : 'idle'}</div>
+              <div><span className="font-medium">Status:</span> {data.archived ? 'archived' : data.running ? 'running' : 'idle'}</div>
               <div><span className="font-medium">Mode:</span> {data.mode ?? 'cycle'}</div>
+            </div>
+          </section>
+
+          <section className="xl:col-span-3 bg-white dark:bg-gray-900 rounded-xl border border-red-200 dark:border-red-900/40 p-4">
+            <h2 className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">Danger Zone</h2>
+            <p className="text-xs text-red-600 dark:text-red-400 mb-3">
+              Hard delete removes the campaign definition and future run/discover access, but historical business records remain in the databases.
+            </p>
+            <div className="flex flex-col md:flex-row gap-3 items-start md:items-end">
+              <div>
+                <label className="block text-xs font-medium text-red-700 dark:text-red-300 mb-1">Type campaign name to confirm delete</label>
+                <input
+                  value={deleteConfirmName}
+                  onChange={(event) => setDeleteConfirmName(event.target.value)}
+                  className="rounded-md border border-red-300 bg-white px-2.5 py-2 text-xs text-gray-900 dark:border-red-900/60 dark:bg-gray-950 dark:text-gray-100"
+                  placeholder={campaignName}
+                />
+              </div>
+              <button
+                onClick={() => deleteMutation.mutate()}
+                disabled={deleteMutation.isPending || Boolean(data?.running) || deleteConfirmName !== campaignName}
+                className="px-4 py-2 text-sm rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                Delete permanently
+              </button>
             </div>
           </section>
 

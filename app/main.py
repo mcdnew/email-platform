@@ -40,6 +40,8 @@ from app.schemas import (
     WorkerCampaignCreateRequest,
     WorkerCampaignDetailRead,
     WorkerCampaignUpdateRequest,
+    WorkerCampaignArchiveRequest,
+    WorkerCampaignDeleteRequest,
     WorkerCampaignSnapshotRead,
     ProspectUpdate,
     LeadCaptureReviewResponse,
@@ -1949,9 +1951,13 @@ def acquisition_campaign_summary(db: Session = Depends(get_session)):
 
 
 @app.get("/acquire/worker/campaigns", response_model=List[WorkerCampaignRead], dependencies=[Depends(require_api_key)])
-def acquisition_worker_campaigns(db: Session = Depends(get_session)):
+def acquisition_worker_campaigns(include_archived: bool = False, db: Session = Depends(get_session)):
     try:
-        res = requests.get(f"{_worker_base_url()}/api/campaigns", timeout=5)
+        res = requests.get(
+            f"{_worker_base_url()}/api/campaigns",
+            params={"include_archived": 1 if include_archived else 0},
+            timeout=5,
+        )
         res.raise_for_status()
         payload = res.json()
         if isinstance(payload, list):
@@ -1967,6 +1973,7 @@ def acquisition_worker_campaigns(db: Session = Depends(get_session)):
                     name=item.name,
                     product=item.product or "",
                     language=item.language or "",
+                    archived=bool(getattr(item, "archived", False)),
                     discover_prompt=item.discover_prompt or "",
                     discover_count=item.discover_count or 0,
                     approval_required=item.approval_required,
@@ -2110,7 +2117,64 @@ def worker_campaign_detail(campaign_name: str, db: Session = Depends(get_session
                 running=cached.running,
                 started=cached.started,
                 error=cached.error,
+                archived=False,
             )
+        raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
+
+
+@app.post("/acquire/worker/campaigns/{campaign_name}/archive", dependencies=[Depends(require_api_key)])
+def archive_worker_campaign(campaign_name: str, payload: WorkerCampaignArchiveRequest, db: Session = Depends(get_session)):
+    try:
+        res = requests.post(
+            f"{_worker_base_url()}/api/campaigns/{campaign_name}/archive",
+            json={"archived": payload.archived},
+            timeout=5,
+        )
+        if res.status_code == 404:
+            raise HTTPException(status_code=404, detail="Worker campaign not found")
+        if res.status_code >= 400:
+            detail = res.json().get("error", res.text)
+            raise HTTPException(status_code=res.status_code, detail=detail)
+        _record_activity_event(
+            db,
+            campaign_key=campaign_name,
+            event_type="acquire.worker_campaign_archived" if payload.archived else "acquire.worker_campaign_restored",
+            source_module="ops",
+            payload={"archived": payload.archived},
+        )
+        db.commit()
+        return res.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
+
+
+@app.post("/acquire/worker/campaigns/{campaign_name}/delete", dependencies=[Depends(require_api_key)])
+def delete_worker_campaign(campaign_name: str, payload: WorkerCampaignDeleteRequest, db: Session = Depends(get_session)):
+    try:
+        res = requests.post(
+            f"{_worker_base_url()}/api/campaigns/{campaign_name}/delete",
+            json={"confirm_name": payload.confirm_name},
+            timeout=5,
+        )
+        if res.status_code == 404:
+            raise HTTPException(status_code=404, detail="Worker campaign not found")
+        if res.status_code >= 400:
+            detail = res.json().get("error", res.text)
+            raise HTTPException(status_code=res.status_code, detail=detail)
+        _record_activity_event(
+            db,
+            campaign_key=campaign_name,
+            event_type="acquire.worker_campaign_deleted",
+            source_module="ops",
+            payload={"confirm_name": payload.confirm_name},
+        )
+        db.commit()
+        return res.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
 
 

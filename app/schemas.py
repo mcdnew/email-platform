@@ -247,6 +247,7 @@ class WorkerCampaignRead(BaseModel):
     name: str
     product: str
     language: str
+    archived: bool = False
     discover_prompt: str
     discover_count: int
     approval_required: bool
@@ -279,10 +280,19 @@ class WorkerCampaignDetailRead(BaseModel):
     running: bool
     started: Optional[str] = None
     error: Optional[str] = None
+    archived: bool = False
 
 
 class WorkerCampaignUpdateRequest(BaseModel):
     config: dict
+
+
+class WorkerCampaignArchiveRequest(BaseModel):
+    archived: bool = True
+
+
+class WorkerCampaignDeleteRequest(BaseModel):
+    confirm_name: str
 
 
 class WorkerCampaignActivityEntryRead(BaseModel):

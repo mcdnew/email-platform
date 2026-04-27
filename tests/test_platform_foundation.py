@@ -714,6 +714,60 @@ def test_worker_campaign_create_proxy_records_activity(client, db, monkeypatch):
     assert event.campaign_key == "alpha"
 
 
+def test_worker_campaign_archive_proxy_records_activity(client, db, monkeypatch):
+    import app.main as app_main
+
+    class DummyResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"message": "saved", "campaign": "alpha", "archived": True}
+
+    def fake_post(url: str, json: dict, timeout: int):
+        assert url.endswith("/api/campaigns/alpha/archive")
+        assert json == {"archived": True}
+        assert timeout == 5
+        return DummyResponse()
+
+    monkeypatch.setattr(app_main.requests, "post", fake_post)
+    resp = client.post("/acquire/worker/campaigns/alpha/archive", json={"archived": True})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["archived"] is True
+
+    event = db.exec(select(ActivityEvent).where(ActivityEvent.event_type == "acquire.worker_campaign_archived")).first()
+    assert event is not None
+    assert event.campaign_key == "alpha"
+
+
+def test_worker_campaign_delete_proxy_records_activity(client, db, monkeypatch):
+    import app.main as app_main
+
+    class DummyResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"message": "deleted", "campaign": "alpha"}
+
+    def fake_post(url: str, json: dict, timeout: int):
+        assert url.endswith("/api/campaigns/alpha/delete")
+        assert json == {"confirm_name": "alpha"}
+        assert timeout == 5
+        return DummyResponse()
+
+    monkeypatch.setattr(app_main.requests, "post", fake_post)
+    resp = client.post("/acquire/worker/campaigns/alpha/delete", json={"confirm_name": "alpha"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["campaign"] == "alpha"
+
+    event = db.exec(select(ActivityEvent).where(ActivityEvent.event_type == "acquire.worker_campaign_deleted")).first()
+    assert event is not None
+    assert event.campaign_key == "alpha"
+
+
 def test_worker_campaign_run_proxy_records_activity(client, db, monkeypatch):
     import app.main as app_main
 

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { discoverWorkerCampaign, getAcquisitionCampaignSummaries, getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, getWorkerCampaigns, handoffOutreachToNurture, reviewLeadCapture, runWorkerCampaign } from '@/lib/api'
+import { archiveWorkerCampaign, discoverWorkerCampaign, getAcquisitionCampaignSummaries, getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, getWorkerCampaigns, handoffOutreachToNurture, reviewLeadCapture, runWorkerCampaign } from '@/lib/api'
 import { Toast } from '@/components/Toast'
 import { useToast } from '@/hooks/useToast'
 
@@ -24,6 +24,7 @@ export default function AcquirePage() {
   const [selectedSequences, setSelectedSequences] = useState<Record<number, string>>({})
   const [captureEmails, setCaptureEmails] = useState<Record<number, string>>({})
   const [discoverCounts, setDiscoverCounts] = useState<Record<string, string>>({})
+  const [showArchivedCampaigns, setShowArchivedCampaigns] = useState(false)
   const { data: pendingCaptures, isLoading: capturesLoading } = useQuery({
     queryKey: ['lead-captures', 'pending_review'],
     queryFn: () => getLeadCaptures({ review_status: 'pending_review', source_type: 'web_discovery' }),
@@ -45,8 +46,8 @@ export default function AcquirePage() {
     queryFn: getAcquisitionCampaignSummaries,
   })
   const { data: workerCampaigns, isLoading: workerCampaignsLoading } = useQuery({
-    queryKey: ['worker-campaigns'],
-    queryFn: getWorkerCampaigns,
+    queryKey: ['worker-campaigns', showArchivedCampaigns],
+    queryFn: () => getWorkerCampaigns({ include_archived: showArchivedCampaigns }),
   })
   const { data: sequences, isLoading: sequencesLoading } = useQuery({
     queryKey: ['sequences'],
@@ -116,6 +117,15 @@ export default function AcquirePage() {
     },
     onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
   })
+  const archiveCampaignMutation = useMutation({
+    mutationFn: ({ campaignName, archived }: { campaignName: string; archived: boolean }) =>
+      archiveWorkerCampaign(campaignName, { archived }),
+    onSuccess: async (_, vars) => {
+      await qc.invalidateQueries({ queryKey: ['worker-campaigns'] })
+      showToast(vars.archived ? 'Campaign archived' : 'Campaign restored')
+    },
+    onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
+  })
 
   return (
     <div className="p-6 space-y-6">
@@ -163,7 +173,17 @@ export default function AcquirePage() {
       <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">Worker Campaigns</h2>
-          <span className="text-xs text-gray-400">{workerCampaigns?.length ?? 0} mirrored configs</span>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={showArchivedCampaigns}
+                onChange={(event) => setShowArchivedCampaigns(event.target.checked)}
+              />
+              Show archived
+            </label>
+            <span className="text-xs text-gray-400">{workerCampaigns?.length ?? 0} mirrored configs</span>
+          </div>
         </div>
         {workerCampaignsLoading ? (
           <p className="text-sm text-gray-500">Loading…</p>
@@ -178,7 +198,7 @@ export default function AcquirePage() {
                     {campaign.name}
                   </Link>
                   <span className={`text-[11px] uppercase tracking-wide ${campaign.running ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
-                    {campaign.running ? 'running' : 'idle'}
+                    {campaign.archived ? 'archived' : campaign.running ? 'running' : 'idle'}
                   </span>
                 </div>
                 <div className="mt-1 text-xs text-gray-500">{campaign.product}</div>
@@ -193,14 +213,14 @@ export default function AcquirePage() {
                   <button
                     onClick={() => runCampaignMutation.mutate({ campaignName: campaign.name, dryRun: false })}
                     className="px-2.5 py-1.5 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-                    disabled={runCampaignMutation.isPending || campaign.running}
+                    disabled={runCampaignMutation.isPending || campaign.running || campaign.archived}
                   >
                     Run cycle
                   </button>
                   <button
                     onClick={() => runCampaignMutation.mutate({ campaignName: campaign.name, dryRun: true })}
                     className="px-2.5 py-1.5 text-xs rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
-                    disabled={runCampaignMutation.isPending || campaign.running}
+                    disabled={runCampaignMutation.isPending || campaign.running || campaign.archived}
                   >
                     Dry run cycle
                   </button>
@@ -219,7 +239,7 @@ export default function AcquirePage() {
                       count: Number(discoverCounts[campaign.name] ?? campaign.discover_count ?? 10) || undefined,
                     })}
                     className="px-2.5 py-1.5 text-xs rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
-                    disabled={discoverCampaignMutation.isPending || campaign.running}
+                    disabled={discoverCampaignMutation.isPending || campaign.running || campaign.archived}
                   >
                     Discover
                   </button>
@@ -230,9 +250,16 @@ export default function AcquirePage() {
                       count: Number(discoverCounts[campaign.name] ?? campaign.discover_count ?? 10) || undefined,
                     })}
                     className="px-2.5 py-1.5 text-xs rounded-md bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900 disabled:opacity-50"
-                    disabled={discoverCampaignMutation.isPending || campaign.running}
+                    disabled={discoverCampaignMutation.isPending || campaign.running || campaign.archived}
                   >
                     Dry run discover
+                  </button>
+                  <button
+                    onClick={() => archiveCampaignMutation.mutate({ campaignName: campaign.name, archived: !campaign.archived })}
+                    className="px-2.5 py-1.5 text-xs rounded-md bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-950 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-900"
+                    disabled={archiveCampaignMutation.isPending || campaign.running}
+                  >
+                    {campaign.archived ? 'Restore' : 'Archive'}
                   </button>
                   <Link
                     href={`/acquire/campaign/${encodeURIComponent(campaign.name)}`}
