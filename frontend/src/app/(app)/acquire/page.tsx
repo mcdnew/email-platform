@@ -5,6 +5,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { discoverWorkerCampaign, getAcquisitionCampaignSummaries, getActivityEvents, getConversations, getLeadCaptures, getProspects, getSequences, getWorkerCampaigns, handoffOutreachToNurture, reviewLeadCapture, runWorkerCampaign } from '@/lib/api'
+import { Toast } from '@/components/Toast'
+import { useToast } from '@/hooks/useToast'
 
 function parseJson(value: string | null): Record<string, unknown> {
   if (!value) return {}
@@ -18,6 +20,7 @@ function parseJson(value: string | null): Record<string, unknown> {
 export default function AcquirePage() {
   const router = useRouter()
   const qc = useQueryClient()
+  const { toast, showToast } = useToast()
   const [selectedSequences, setSelectedSequences] = useState<Record<number, string>>({})
   const [captureEmails, setCaptureEmails] = useState<Record<number, string>>({})
   const [discoverCounts, setDiscoverCounts] = useState<Record<string, string>>({})
@@ -59,9 +62,17 @@ export default function AcquirePage() {
         qc.invalidateQueries({ queryKey: ['prospects'] }),
       ])
       if (result.review_status === 'approved' && result.prospect_id) {
+        showToast('Lead approved and opened as a prospect')
         router.push(`/acquire/${result.prospect_id}`)
+        return
+      }
+      if (result.review_status === 'approved') {
+        showToast('Lead approved, but no prospect was created. Add an email first.')
+      } else {
+        showToast('Lead rejected')
       }
     },
+    onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
   })
   const handoffMutation = useMutation({
     mutationFn: ({ prospectId, sequenceId }: { prospectId: number; sequenceId: number }) =>
@@ -76,7 +87,9 @@ export default function AcquirePage() {
         qc.invalidateQueries({ queryKey: ['prospects'] }),
         qc.invalidateQueries({ queryKey: ['activity-events'] }),
       ])
+      showToast('Handed off to nurture')
     },
+    onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
   })
   const runCampaignMutation = useMutation({
     mutationFn: ({ campaignName, dryRun }: { campaignName: string; dryRun: boolean }) =>
@@ -86,7 +99,9 @@ export default function AcquirePage() {
         qc.invalidateQueries({ queryKey: ['worker-campaigns'] }),
         qc.invalidateQueries({ queryKey: ['activity-events'] }),
       ])
+      showToast('Worker cycle started')
     },
+    onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
   })
   const discoverCampaignMutation = useMutation({
     mutationFn: ({ campaignName, dryRun, count }: { campaignName: string; dryRun: boolean; count?: number }) =>
@@ -97,7 +112,9 @@ export default function AcquirePage() {
         qc.invalidateQueries({ queryKey: ['activity-events'] }),
         qc.invalidateQueries({ queryKey: ['lead-captures'] }),
       ])
+      showToast('Worker discovery started')
     },
+    onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
   })
 
   return (
@@ -209,6 +226,12 @@ export default function AcquirePage() {
                   >
                     Dry run discover
                   </button>
+                  <Link
+                    href={`/acquire/campaign/${encodeURIComponent(campaign.name)}`}
+                    className="px-2.5 py-1.5 text-xs rounded-md bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 dark:bg-gray-950 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-900"
+                  >
+                    Debug
+                  </Link>
                 </div>
                 {campaign.error && <div className="mt-2 text-[11px] text-red-500">{campaign.error}</div>}
               </div>
@@ -406,6 +429,8 @@ export default function AcquirePage() {
           )}
         </section>
       </div>
+
+      <Toast toast={toast} />
     </div>
   )
 }
