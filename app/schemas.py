@@ -267,6 +267,11 @@ class WorkerCampaignDiscoverRequest(BaseModel):
     count: Optional[int] = None
 
 
+class WorkerCampaignCreateRequest(BaseModel):
+    name: str
+    config: dict
+
+
 class WorkerCampaignDetailRead(BaseModel):
     name: str
     config: dict

@@ -124,6 +124,14 @@ export default function AcquirePage() {
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           Pending discovered leads and high-signal outreach contacts now owned by the core platform.
         </p>
+        <div className="mt-3">
+          <Link
+            href="/acquire/campaign/new"
+            className="inline-flex items-center rounded-md bg-emerald-600 px-3 py-2 text-sm text-white hover:bg-emerald-700"
+          >
+            New campaign
+          </Link>
+        </div>
       </div>
 
       <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">

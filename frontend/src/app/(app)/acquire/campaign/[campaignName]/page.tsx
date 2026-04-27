@@ -12,11 +12,15 @@ import {
   runWorkerCampaign,
   updateWorkerCampaign,
 } from '@/lib/api'
+import { Toast } from '@/components/Toast'
+import { useToast } from '@/hooks/useToast'
+import { WorkerCampaignEditor } from '@/components/WorkerCampaignEditor'
 
 export default function AcquireCampaignDetailPage() {
   const params = useParams<{ campaignName: string }>()
   const campaignName = decodeURIComponent(params.campaignName)
   const qc = useQueryClient()
+  const { toast, showToast } = useToast()
   const [configJson, setConfigJson] = useState('')
   const [previewTab, setPreviewTab] = useState<'json' | 'text' | 'html'>('json')
   const [discoverCount, setDiscoverCount] = useState('10')
@@ -53,7 +57,9 @@ export default function AcquireCampaignDetailPage() {
         qc.invalidateQueries({ queryKey: ['worker-campaign-activity', campaignName] }),
         qc.invalidateQueries({ queryKey: ['worker-campaign-traces', campaignName] }),
       ])
+      showToast('Cycle started')
     },
+    onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
   })
   const discoverMutation = useMutation({
     mutationFn: ({ dryRun }: { dryRun: boolean }) =>
@@ -66,7 +72,9 @@ export default function AcquireCampaignDetailPage() {
         qc.invalidateQueries({ queryKey: ['worker-campaign-activity', campaignName] }),
         qc.invalidateQueries({ queryKey: ['worker-campaign-traces', campaignName] }),
       ])
+      showToast('Discovery started')
     },
+    onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
   })
   const saveMutation = useMutation({
     mutationFn: (config: Record<string, unknown>) => updateWorkerCampaign(campaignName, { config }),
@@ -76,7 +84,9 @@ export default function AcquireCampaignDetailPage() {
         qc.invalidateQueries({ queryKey: ['worker-campaigns'] }),
         qc.invalidateQueries({ queryKey: ['activity-events'] }),
       ])
+      showToast('Campaign config saved')
     },
+    onError: (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'err'),
   })
 
   const cfg = data?.config ?? {}
@@ -258,6 +268,16 @@ export default function AcquireCampaignDetailPage() {
         <p className="text-sm text-gray-500">Campaign data unavailable.</p>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="xl:col-span-3">
+            <WorkerCampaignEditor
+              mode="edit"
+              initialName={campaignName}
+              initialConfig={data.config}
+              saving={saveMutation.isPending}
+              onSave={({ config }) => saveMutation.mutate(config)}
+            />
+          </div>
+
           <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
             <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">Campaign</h2>
             <div className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
@@ -427,6 +447,7 @@ export default function AcquireCampaignDetailPage() {
           </section>
         </div>
       )}
+      <Toast toast={toast} />
     </div>
   )
 }

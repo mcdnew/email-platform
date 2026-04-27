@@ -243,6 +243,12 @@ export const getAcquisitionCampaignSummaries = () =>
 export const getWorkerCampaigns = () =>
   req<WorkerCampaign[]>('/acquire/worker/campaigns')
 
+export const createWorkerCampaign = (data: { name: string; config: Record<string, unknown> }) =>
+  req<{ message: string; campaign: string }>('/acquire/worker/campaigns', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
 export const runWorkerCampaign = (campaignName: string, data: { dry_run?: boolean } = {}) =>
   req<{ message: string; campaign: string; dry_run: boolean }>(`/acquire/worker/campaigns/${campaignName}/run`, {
     method: 'POST',

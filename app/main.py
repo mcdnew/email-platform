@@ -37,6 +37,7 @@ from app.schemas import (
     WorkerCampaignRead,
     WorkerCampaignRunRequest,
     WorkerCampaignDiscoverRequest,
+    WorkerCampaignCreateRequest,
     WorkerCampaignDetailRead,
     WorkerCampaignUpdateRequest,
     WorkerCampaignSnapshotRead,
@@ -1978,6 +1979,41 @@ def acquisition_worker_campaigns(db: Session = Depends(get_session)):
                 )
                 for item in cached
             ]
+        raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
+
+
+@app.post("/acquire/worker/campaigns", dependencies=[Depends(require_api_key)])
+def create_worker_campaign(payload: WorkerCampaignCreateRequest, db: Session = Depends(get_session)):
+    try:
+        res = requests.post(
+            f"{_worker_base_url()}/api/campaigns",
+            json={"name": payload.name, "config": payload.config},
+            timeout=5,
+        )
+        if res.status_code == 409:
+            raise HTTPException(status_code=409, detail="Worker campaign already exists")
+        if res.status_code >= 400:
+            detail = res.json().get("error", res.text)
+            raise HTTPException(status_code=res.status_code, detail=detail)
+        snapshot = _upsert_worker_campaign_snapshot(
+            db,
+            {
+                "name": payload.name,
+                "config": payload.config,
+            },
+        )
+        _record_activity_event(
+            db,
+            campaign_key=payload.name,
+            event_type="acquire.worker_campaign_created",
+            source_module="ops",
+            payload={"snapshot_id": snapshot.id},
+        )
+        db.commit()
+        return res.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Worker unavailable: {exc}")
 
 
