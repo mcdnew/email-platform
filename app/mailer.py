@@ -85,7 +85,7 @@ def send_email(
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = smtp_user
+    msg["From"] = smtp_user or os.getenv("MAIL_FROM", "noreply@localhost")
     msg["To"] = to_email
     if bcc_email:
         msg["Bcc"] = bcc_email
@@ -95,8 +95,9 @@ def send_email(
 
     try:
         with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
+            if smtp_user:
+                server.starttls()
+                server.login(smtp_user, smtp_password)
             server.send_message(msg)
         return "sent"
     except smtplib.SMTPRecipientsRefused as e:
